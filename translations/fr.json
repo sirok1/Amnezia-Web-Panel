@@ -241,5 +241,8 @@
     "restore_backup": "Restaurer depuis un fichier",
     "restore_confirm": "Êtes-vous sûr ? Les données actuelles seront écrasées et l'application redémarrera.",
     "restore_success": "Restauration réussie ! Redémarrage...",
-    "invalid_backup_file": "Fichier de sauvegarde ou structure invalide"
+    "invalid_backup_file": "Fichier de sauvegarde ou structure invalide",
+    "config_unavailable": "Configuration indisponible",
+    "config_unavailable_desc": "Ce client a été créé via l'application native Amnezia.\\nLa clé privée est stockée uniquement sur l'appareil de l'utilisateur et ne peut pas être récupérée par le serveur.",
+    "client_public_key": "Clé publique du client :"
 }

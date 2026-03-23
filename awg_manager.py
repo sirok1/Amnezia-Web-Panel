@@ -100,6 +100,7 @@ class AWGManager:
     # Protocol types
     AWG = 'awg'          # New AWG (awg-go based, uses awg/awg-quick)
     AWG_LEGACY = 'awg_legacy'  # Legacy AWG (uses wg/wg-quick)
+    AWG2 = 'awg2'        # AmneziaWG 2.0 (separate container amnezia-awg2)
 
     def __init__(self, ssh_manager):
         self.ssh = ssh_manager
@@ -108,18 +109,22 @@ class AWGManager:
         """Get Docker container name for protocol type."""
         if protocol_type == self.AWG_LEGACY:
             return 'amnezia-awg-legacy'
+        if protocol_type == self.AWG2:
+            return 'amnezia-awg2'
         return 'amnezia-awg'
 
     def _config_path(self, protocol_type):
         """Get server config path inside container."""
         if protocol_type == self.AWG_LEGACY:
             return '/opt/amnezia/awg/wg0.conf'
+        # Both AWG and AWG2 use awg0.conf
         return '/opt/amnezia/awg/awg0.conf'
 
     def _wg_binary(self, protocol_type):
         """Get the wireguard binary name."""
         if protocol_type == self.AWG_LEGACY:
             return 'wg'
+        # AWG and AWG2 both use 'awg' binary
         return 'awg'
 
 
@@ -127,6 +132,7 @@ class AWGManager:
         """Get the wireguard-quick binary name."""
         if protocol_type == self.AWG_LEGACY:
             return 'wg-quick'
+        # AWG and AWG2 both use 'awg-quick'
         return 'awg-quick'
 
 
@@ -134,11 +140,12 @@ class AWGManager:
         """Get the interface name."""
         if protocol_type == self.AWG_LEGACY:
             return 'wg0'
+        # AWG and AWG2 both use 'awg0' interface
         return 'awg0'
 
     def _docker_image(self, protocol_type):
         """Get Docker image for protocol type."""
-        if protocol_type == self.AWG:
+        if protocol_type in (self.AWG, self.AWG2):
             return 'amneziavpn/amneziawg-go:latest'
         return 'amneziavpn/amnezia-wg:latest'
 
@@ -379,7 +386,7 @@ iptables -C FORWARD -j DOCKER-USER 2>/dev/null || iptables -A FORWARD -j DOCKER-
         subnet_cidr = AWG_DEFAULTS['subnet_cidr']
 
         # Build the server config generation script
-        if protocol_type == self.AWG:
+        if protocol_type in (self.AWG, self.AWG2):
             config_script = f"""
 mkdir -p /opt/amnezia/awg
 cd /opt/amnezia/awg
@@ -557,6 +564,19 @@ tail -f /dev/null
             raise RuntimeError(f"Failed to get server config: {err}")
         return out
 
+    def save_server_config(self, protocol_type, config_content):
+        """Save the server WireGuard config and restart container."""
+        container_name = self._container_name(protocol_type)
+        config_path = self._config_path(protocol_type)
+
+        # Upload new config into container via SFTP + docker cp
+        self.ssh.upload_file(config_content.replace('\r\n', '\n'), "/tmp/_amnz_edit_config.conf")
+        self.ssh.run_sudo_command(f"docker cp /tmp/_amnz_edit_config.conf {container_name}:{config_path}")
+        self.ssh.run_command("rm -f /tmp/_amnz_edit_config.conf")
+
+        # Restart container to apply all changes (including port and interface changes)
+        self.ssh.run_sudo_command(f"docker restart {container_name}")
+
     def _get_server_public_key(self, protocol_type):
         """Get server public key."""
         container_name = self._container_name(protocol_type)
@@ -582,6 +602,7 @@ tail -f /dev/null
         config = self._get_server_config(protocol_type)
         params = {}
         param_map = {
+            'ListenPort': 'port',
             'Jc': 'junk_packet_count',
             'Jmin': 'junk_packet_min_size',
             'Jmax': 'junk_packet_max_size',
@@ -646,6 +667,26 @@ tail -f /dev/null
         parts[3] = str(next_octet)
         return '.'.join(parts)
 
+    def _parse_peers_from_config(self, protocol_type):
+        """Parse [Peer] sections from WireGuard server config and return dict of pubkey -> {allowedIps}."""
+        try:
+            config = self._get_server_config(protocol_type)
+        except Exception:
+            return {}
+
+        peers = {}
+        current_key = None
+        for line in config.split('\n'):
+            line = line.strip()
+            if line == '[Peer]':
+                current_key = None
+            elif current_key is None and line.startswith('PublicKey'):
+                current_key = line.split('=', 1)[1].strip()
+                peers[current_key] = {'allowedIps': ''}
+            elif current_key and line.startswith('AllowedIPs'):
+                peers[current_key]['allowedIps'] = line.split('=', 1)[1].strip()
+        return peers
+
     def get_clients(self, protocol_type):
         """Get list of all clients."""
         clients_table = self._get_clients_table(protocol_type)
@@ -657,8 +698,10 @@ tail -f /dev/null
             wg_show_data = {}
 
         # Enrich clients table with wg show data
+        known_ids = set()
         for client in clients_table:
             client_id = client.get('clientId', '')
+            known_ids.add(client_id)
             if client_id in wg_show_data:
                 show_data = wg_show_data[client_id]
                 user_data = client.get('userData', {})
@@ -669,6 +712,40 @@ tail -f /dev/null
                 user_data['dataSentBytes'] = show_data.get('dataSentBytes', 0)
                 user_data['allowedIps'] = show_data.get('allowedIps', '')
                 client['userData'] = user_data
+
+        # Pick up peers from conf that are NOT in clientsTable (created via native Amnezia app)
+        try:
+            conf_peers = self._parse_peers_from_config(protocol_type)
+            for pub_key, peer_info in conf_peers.items():
+                if pub_key in known_ids:
+                    continue  # already in table
+                show_data = wg_show_data.get(pub_key, {})
+                # Derive display name from AllowedIPs (e.g. 10.8.1.5/32 -> peer-10.8.1.5)
+                allowed_ip = peer_info.get('allowedIps', '') or show_data.get('allowedIps', '')
+                ip_part = ''
+                if allowed_ip:
+                    import re as _re
+                    m = _re.search(r'(\d+\.\d+\.\d+\.\d+)', allowed_ip)
+                    if m:
+                        ip_part = m.group(1)
+                display_name = f'External ({ip_part})' if ip_part else 'External (native app)'
+                clients_table.append({
+                    'clientId': pub_key,
+                    'userData': {
+                        'clientName': display_name,
+                        'clientPrivateKey': '',   # not available
+                        'externalClient': True,
+                        'clientIp': ip_part,
+                        'latestHandshake': show_data.get('latestHandshake', ''),
+                        'dataReceived': show_data.get('dataReceived', ''),
+                        'dataSent': show_data.get('dataSent', ''),
+                        'dataReceivedBytes': show_data.get('dataReceivedBytes', 0),
+                        'dataSentBytes': show_data.get('dataSentBytes', 0),
+                        'allowedIps': allowed_ip,
+                    }
+                })
+        except Exception as e:
+            logger.warning(f'get_clients: failed to parse conf peers: {e}')
 
         return clients_table
 
@@ -781,11 +858,15 @@ AllowedIPs = {client_ip}/32
         self._save_clients_table(protocol_type, clients_table)
 
         # Build client config
+        awg_params = self._get_awg_params_from_config(protocol_type)
+        if awg_params.get('port'):
+            port = awg_params['port']
+
         dns1 = AWG_DEFAULTS['dns1']
         dns2 = AWG_DEFAULTS['dns2']
         mtu = AWG_DEFAULTS['mtu']
 
-        if protocol_type == self.AWG:
+        if protocol_type in (self.AWG, self.AWG2):
             client_config = f"""[Interface]
 Address = {client_ip}/32
 DNS = {dns1}, {dns2}
@@ -867,11 +948,14 @@ PersistentKeepalive = 25
             psk = self._get_server_psk(protocol_type)
 
         awg_params = self._get_awg_params_from_config(protocol_type)
+        if awg_params.get('port'):
+            port = awg_params['port']
+
         dns1 = AWG_DEFAULTS['dns1']
         dns2 = AWG_DEFAULTS['dns2']
         mtu = AWG_DEFAULTS['mtu']
 
-        if protocol_type == self.AWG:
+        if protocol_type in (self.AWG, self.AWG2):
             config = f"""[Interface]
 Address = {client_ip}/32
 DNS = {dns1}, {dns2}

@@ -37,6 +37,30 @@
 </h2>
 
 <div class="protocol-cards">
+    <!-- AWG2 Card (first - new version) -->
+    <div class="card card-hover protocol-card protocol-awg" id="proto-awg2">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:var(--space-sm);">
+            <div class="protocol-icon">✨</div>
+            <div class="flex gap-sm" id="awg2-ctrl" style="display:none!important;"></div>
+        </div>
+        <div class="protocol-name">AmneziaWG 2.0 <span style="font-size:0.65rem; background:var(--accent); color:#fff; padding:2px 6px; border-radius:8px; vertical-align:middle;">NEW</span></div>
+        <div class="protocol-desc">
+            {{ _('awg_desc') }}
+        </div>
+        <div class="protocol-status" id="awg2-status">
+            <span class="badge badge-warn"><span class="badge-dot"></span> {{ _('not_checked') }}</span>
+        </div>
+        <div id="awg2-info" class="hidden">
+            <div class="protocol-info" id="awg2-info-grid"></div>
+        </div>
+        <div class="flex gap-sm" id="awg2-actions">
+            <button class="btn btn-primary btn-sm" onclick="openInstallModal('awg2')" id="awg2-install-btn"
+                style="flex:1">
+                {{ _('install') }}
+            </button>
+        </div>
+    </div>
+
     <!-- AWG Card -->
     <div class="card card-hover protocol-card protocol-awg" id="proto-awg">
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:var(--space-sm);">
@@ -121,6 +145,7 @@
             <select class="form-select" id="connProtoSelect" onchange="loadConnections()"
                 style="width:auto; min-width:160px;">
                 <option value="awg">AmneziaWG</option>
+                <option value="awg2">AmneziaWG 2.0</option>
                 <option value="awg_legacy">AWG Legacy</option>
                 <option value="xray">Xray</option>
             </select>
@@ -278,16 +303,23 @@
             <button class="modal-close" onclick="closeModal('serverConfigModal')">×</button>
         </div>
         <div class="config-display" style="margin-top:var(--space-md);">
-            <div class="config-text" id="serverConfigText" style="max-height:60vh; overflow-y:auto;"></div>
+            <!-- Hidden input to store current proto -->
+            <input type="hidden" id="serverConfigProto" value="" />
+            <textarea class="form-input" id="serverConfigText" style="width:100%; height:40vh; resize:vertical; font-family:monospace; white-space:pre; padding:var(--space-sm);"></textarea>
             <div class="config-actions" style="margin-top:var(--space-sm);">
                 <button class="btn btn-secondary btn-sm"
-                    onclick="copyToClipboard(document.getElementById('serverConfigText').textContent)" style="flex:1">
+                    onclick="copyToClipboard(document.getElementById('serverConfigText').value)" style="flex:1">
                     {{ _('copy') }}
                 </button>
-                <button class="btn btn-primary btn-sm"
-                    onclick="downloadFile(document.getElementById('serverConfigText').textContent, serverConfigFilename)"
+                <button class="btn btn-secondary btn-sm"
+                    onclick="downloadFile(document.getElementById('serverConfigText').value, serverConfigFilename)"
                     style="flex:1">
                     {{ _('download') }}
+                </button>
+                <button class="btn btn-primary btn-sm"
+                    onclick="saveServerConfig()"
+                    style="flex:1" id="saveServerConfigBtn">
+                    {{ _('save') }}
                 </button>
             </div>
         </div>
@@ -306,6 +338,7 @@
 
     function getProtoTitle(p) {
         if (p === 'awg') return 'AmneziaWG';
+        if (p === 'awg2') return 'AmneziaWG 2.0';
         if (p === 'awg_legacy') return 'AWG Legacy';
         if (p === 'xray') return 'Xray';
         return p.toUpperCase();
@@ -478,11 +511,36 @@
             showToast(_('loading'), 'info');
             const res = await apiCall(`/api/servers/${SERVER_ID}/server_config`, 'POST', { protocol: proto });
             document.getElementById('serverConfigModalTitle').textContent = `${_('server_config')} — ${name}`;
-            document.getElementById('serverConfigText').textContent = res.config || '(empty)';
+            document.getElementById('serverConfigProto').value = proto;
+            document.getElementById('serverConfigText').value = res.config || '';
             serverConfigFilename = `server_${proto}.conf`;
             openModal('serverConfigModal');
         } catch (err) {
             showToast('Ошибка: ' + err.message, 'error');
+        }
+    }
+
+    // Save server config changes
+    async function saveServerConfig() {
+        const proto = document.getElementById('serverConfigProto').value;
+        const newConfig = document.getElementById('serverConfigText').value;
+        const btn = document.getElementById('saveServerConfigBtn');
+        const oldText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = _('saving') || 'Saving...';
+        
+        try {
+            await apiCall(`/api/servers/${SERVER_ID}/server_config/save`, 'POST', { 
+                protocol: proto, 
+                config: newConfig 
+            });
+            showToast(_('success') || 'Saved successfully', 'success');
+            closeModal('serverConfigModal');
+        } catch (err) {
+            showToast((_('error') || 'Error') + ': ' + err.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = oldText;
         }
     }
 
@@ -642,6 +700,9 @@
                 const disabledStyle = enabled ? '' : 'opacity:0.5;';
                 const toggleIcon = enabled ? '🔵' : '⚫';
                 const toggleTitle = enabled ? _('stop') : _('starting');
+                // Show config button for all WireGuard-based clients.
+                // If clientPrivateKey is missing (created via native app), we show a warning instead.
+                const canShowConfig = proto === 'xray' || true; // always show 📄 button
 
                 listEl.innerHTML += `
                     <div class="client-item" style="${disabledStyle}">
@@ -653,7 +714,7 @@
                             </div>
                         </div>
                         <div class="client-actions">
-                            ${hasPrivKey ? `<button class="btn btn-secondary btn-sm btn-icon" onclick="showConnectionConfig('${escapeJs(client.clientId)}', '${escapeJs(name)}')" title="${_('config')}">📄</button>` : ''}
+                            <button class="btn btn-secondary btn-sm btn-icon" onclick="showConnectionConfig('${escapeJs(client.clientId)}', '${escapeJs(name)}', ${!!userData.clientPrivateKey || proto === 'xray'})" title="${_('config')}">📄</button>
                             <button class="btn btn-secondary btn-sm btn-icon" onclick="toggleConnection('${escapeJs(client.clientId)}', ${!enabled})" title="${toggleTitle}">${toggleIcon}</button>
                             <button class="btn btn-danger btn-sm btn-icon" onclick="removeConnection('${escapeJs(client.clientId)}')" title="${_('delete')}">🗑</button>
                         </div>
@@ -718,8 +779,32 @@
         }
     }
 
-    async function showConnectionConfig(clientId, connName) {
+    async function showConnectionConfig(clientId, connName, hasKey) {
         const proto = document.getElementById('connProtoSelect').value;
+
+        // Restore tabs visibility first
+        document.getElementById('panel-vpn').style.display = '';
+        document.getElementById('panel-qr').style.display = '';
+        document.querySelectorAll('.config-tab')[1].style.display = '';
+        document.querySelectorAll('.config-tab')[2].style.display = '';
+
+        // Client was created via native Amnezia app — private key is not stored server-side
+        if (!hasKey) {
+            document.getElementById('configModalTitle').textContent = `${_('config')} — ${connName}`;
+            currentConfig = '';
+            currentVpnLink = '';
+            currentConfigName = connName.replace(/\s+/g, '_');
+            document.getElementById('configText').innerHTML = `<div style="padding:var(--space-md);background:var(--bg-primary);border-radius:var(--radius-md);border:1px solid var(--border-color);"><div style="font-size:1.4rem;margin-bottom:var(--space-sm);">⚠️</div><div style="font-weight:600;margin-bottom:var(--space-sm);">${_('config_unavailable')}</div><div style="font-size:0.85rem;color:var(--text-muted);line-height:1.6;">${_('config_unavailable_desc').replace(/\\n/g, '<br>')}<br><br><strong>${_('client_public_key')}</strong><br><code style="word-break:break-all;font-size:0.78rem;">${escapeHtml(clientId)}</code></div></div>`;
+            document.getElementById('vpnLinkText').textContent = '';
+            document.getElementById('panel-vpn').style.display = 'none';
+            document.getElementById('panel-qr').style.display = 'none';
+            document.querySelectorAll('.config-tab')[1].style.display = 'none';
+            document.querySelectorAll('.config-tab')[2].style.display = 'none';
+            switchConfigTab('conf');
+            openModal('configModal');
+            return;
+        }
+
         try {
             showToast(_('loading'), 'info');
             const result = await apiCall(`/api/servers/${SERVER_ID}/connections/config`, 'POST', {

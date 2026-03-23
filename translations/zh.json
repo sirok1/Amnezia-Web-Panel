@@ -241,5 +241,8 @@
     "restore_backup": "从文件恢复",
     "restore_confirm": "您确定吗？当前数据将被覆盖，应用程序将重新启动。",
     "restore_success": "恢复成功！正在重启...",
-    "invalid_backup_file": "备份文件无效或结构错误"
+    "invalid_backup_file": "备份文件无效或结构错误",
+    "config_unavailable": "配置文件不可用",
+    "config_unavailable_desc": "此客户端是通过 Amnezia 原生应用创建的。\\n私钥仅存储在用户设备上，服务器无法恢复。",
+    "client_public_key": "客户端公钥："
 }

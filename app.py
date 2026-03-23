@@ -500,6 +500,11 @@ class AddUserRequest(BaseModel):
     connection_name: Optional[str] = None
 
 
+class ServerConfigSaveRequest(BaseModel):
+    protocol: str
+    config: str
+
+
 class AppearanceSettings(BaseModel):
     title: str = 'Amnezia'
     logo: str = '🛡'
@@ -631,7 +636,7 @@ async def periodic_background_tasks():
                 try:
                     ssh = get_ssh(server)
                     ssh.connect()
-                    for proto in ['awg', 'awg_legacy', 'xray']:
+                    for proto in ['awg', 'awg2', 'awg_legacy', 'xray']:
                         if proto in server.get('protocols', {}):
                             manager = get_protocol_manager(ssh, proto)
                             clients = manager.get_clients(proto)
@@ -958,12 +963,36 @@ async def api_check_server(request: Request, server_id: int):
         # Just use awg's docker checker since it uses the same command
         manager = get_protocol_manager(ssh, 'awg')
         status = {'connection': 'ok', 'docker_installed': manager.check_docker_installed(), 'protocols': {}}
-        for proto in ['awg', 'awg_legacy', 'xray']:
+        
+        changed = False
+        if 'protocols' not in server:
+            server['protocols'] = {}
+
+        for proto in ['awg', 'awg2', 'awg_legacy', 'xray']:
             try:
                 p_manager = get_protocol_manager(ssh, proto)
-                status['protocols'][proto] = p_manager.get_server_status(proto)
+                result = p_manager.get_server_status(proto)
+                status['protocols'][proto] = result
+                
+                # Auto-sync panel data based on external state
+                if result.get('container_exists'):
+                    if proto not in server['protocols']:
+                        server['protocols'][proto] = {
+                            'installed': True,
+                            'port': result.get('port', '55424'),
+                            'awg_params': result.get('awg_params', {})
+                        }
+                        changed = True
+                else:
+                    if proto in server['protocols']:
+                        del server['protocols'][proto]
+                        changed = True
             except Exception as e:
                 status['protocols'][proto] = {'error': str(e)}
+                
+        if changed:
+            save_data(data)
+            
         ssh.disconnect()
         return status
     except Exception as e:
@@ -979,7 +1008,7 @@ async def api_install_protocol(request: Request, server_id: int, req: InstallPro
         data = load_data()
         if server_id >= len(data['servers']):
             return JSONResponse({'error': 'Server not found'}, status_code=404)
-        if req.protocol not in ['awg', 'awg_legacy', 'xray']:
+        if req.protocol not in ['awg', 'awg2', 'awg_legacy', 'xray']:
             return JSONResponse({'error': 'Invalid protocol type'}, status_code=400)
         
         server = data['servers'][server_id]
@@ -1031,6 +1060,7 @@ async def api_uninstall_protocol(request: Request, server_id: int, req: Protocol
 
 CONTAINER_NAMES = {
     'awg': 'amnezia-awg',
+    'awg2': 'amnezia-awg2',
     'awg_legacy': 'amnezia-awg-legacy',
     'xray': 'amnezia-xray',
 }
@@ -1094,6 +1124,38 @@ async def api_server_config(request: Request, server_id: int, req: ProtocolReque
         return {'config': config}
     except Exception as e:
         logger.exception("Error getting server config")
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
+@app.post('/api/servers/{server_id}/server_config/save')
+async def api_server_config_save(request: Request, server_id: int, req: ServerConfigSaveRequest):
+    """Save the raw server-side WireGuard/Xray configuration and apply changes."""
+    if not _check_admin(request):
+        return JSONResponse({'error': 'Forbidden'}, status_code=403)
+    try:
+        data = load_data()
+        if server_id >= len(data['servers']):
+            return JSONResponse({'error': 'Server not found'}, status_code=404)
+        server = data['servers'][server_id]
+        ssh = get_ssh(server)
+        ssh.connect()
+        if req.protocol == 'xray':
+            from xray_manager import XrayManager
+            mgr = XrayManager(ssh)
+            import json as _json
+            try:
+                data_json = _json.loads(req.config)
+            except Exception as e:
+                ssh.disconnect()
+                return JSONResponse({'error': f'Invalid JSON format: {str(e)}'}, status_code=400)
+            mgr._save_server_json(data_json)
+        else:
+            mgr = AWGManager(ssh)
+            mgr.save_server_config(req.protocol, req.config)
+        ssh.disconnect()
+        return {'status': 'success'}
+    except Exception as e:
+        logger.exception("Error saving server config")
         return JSONResponse({'error': str(e)}, status_code=500)
 
 
