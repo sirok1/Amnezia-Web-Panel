@@ -43,6 +43,7 @@ Configuration panel for system parameters and preferences:
 *   **⚡ Multi-Protocol Support**:
     *   **AmneziaWG**: Advanced WireGuard-based protocol with S3/S4 obfuscation to bypass deep packet inspection (DPI).
     *   **Xray (XTLS-Reality)**: Stealthy protocol that masks VPN traffic as standard HTTPS browsing.
+    *   **Telemt (Telegram Proxy)**: High-performance Telegram MTProxy with TLS emulation and comprehensive management (quotas, IP limits, and real-time session tracking).
 *   **🌐 Internationalization (i18n)**:
     *   Full support for **English**, **Russian**, **French**, **Chinese**, and **Persian**.
     *   Native **RTL (Right-to-Left)** support for Persian language.
