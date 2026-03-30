@@ -129,7 +129,12 @@ def get_ssh(server):
 
 def get_protocol_manager(ssh, protocol: str):
     if protocol == 'xray':
+        from xray_manager import XrayManager
         return XrayManager(ssh)
+    elif protocol == 'telemt':
+        from telemt_manager import TelemtManager
+        return TelemtManager(ssh)
+    from awg_manager import AWGManager
     return AWGManager(ssh)
 
 
@@ -464,6 +469,9 @@ class AddServerRequest(BaseModel):
 class InstallProtocolRequest(BaseModel):
     protocol: str = 'awg'
     port: str = '55424'
+    tls_emulation: Optional[bool] = None
+    tls_domain: Optional[str] = None
+    max_connections: Optional[int] = None
 
 
 class ProtocolRequest(BaseModel):
@@ -474,6 +482,17 @@ class AddConnectionRequest(BaseModel):
     protocol: str = 'awg'
     name: str = 'Connection'
     user_id: Optional[str] = None
+    telemt_quota: Optional[str] = None
+    telemt_max_ips: Optional[int] = None
+    telemt_expiry: Optional[str] = None
+
+
+class EditConnectionRequest(BaseModel):
+    protocol: str = 'telemt'
+    client_id: str = ''
+    telemt_quota: Optional[str] = None
+    telemt_max_ips: Optional[int] = None
+    telemt_expiry: Optional[str] = None
 
 
 class ConnectionActionRequest(BaseModel):
@@ -555,6 +574,9 @@ class AddUserConnectionRequest(BaseModel):
     protocol: str = 'awg'
     name: str = 'VPN Connection'
     client_id: Optional[str] = None
+    telemt_quota: Optional[str] = None
+    telemt_max_ips: Optional[int] = None
+    telemt_expiry: Optional[str] = None
 
 
 class ShareSetupRequest(BaseModel):
@@ -968,10 +990,16 @@ async def api_check_server(request: Request, server_id: int):
         if 'protocols' not in server:
             server['protocols'] = {}
 
-        for proto in ['awg', 'awg2', 'awg_legacy', 'xray']:
+        for proto in ['awg', 'awg2', 'awg_legacy', 'xray', 'telemt']:
             try:
                 p_manager = get_protocol_manager(ssh, proto)
                 result = p_manager.get_server_status(proto)
+                
+                # Check if we have port in DB already
+                db_proto = server.get('protocols', {}).get(proto, {})
+                if not result.get('port') and db_proto.get('port'):
+                    result['port'] = db_proto['port']
+                    
                 status['protocols'][proto] = result
                 
                 # Auto-sync panel data based on external state
@@ -1008,7 +1036,7 @@ async def api_install_protocol(request: Request, server_id: int, req: InstallPro
         data = load_data()
         if server_id >= len(data['servers']):
             return JSONResponse({'error': 'Server not found'}, status_code=404)
-        if req.protocol not in ['awg', 'awg2', 'awg_legacy', 'xray']:
+        if req.protocol not in ['awg', 'awg2', 'awg_legacy', 'xray', 'telemt']:
             return JSONResponse({'error': 'Invalid protocol type'}, status_code=400)
         
         server = data['servers'][server_id]
@@ -1016,9 +1044,19 @@ async def api_install_protocol(request: Request, server_id: int, req: InstallPro
         ssh.connect()
         manager = get_protocol_manager(ssh, req.protocol)
         
-        # pass port as positional or keyword depending on manager implementation, 
-        # both use identical signatures or we just pass port
-        result = manager.install_protocol(port=req.port) if req.protocol == 'xray' else manager.install_protocol(req.protocol, port=req.port)
+        # Pass parameters to installer
+        if req.protocol == 'telemt':
+            result = manager.install_protocol(
+                protocol_type=req.protocol, 
+                port=req.port,
+                tls_emulation=req.tls_emulation if req.tls_emulation is not None else True,
+                tls_domain=req.tls_domain,
+                max_connections=req.max_connections if req.max_connections is not None else 0
+            )
+        elif req.protocol == 'xray':
+            result = manager.install_protocol(port=req.port)
+        else:
+            result = manager.install_protocol(req.protocol, port=req.port)
         
         server['protocols'][req.protocol] = {
             'installed': True, 'port': req.port,
@@ -1063,6 +1101,7 @@ CONTAINER_NAMES = {
     'awg2': 'amnezia-awg2',
     'awg_legacy': 'amnezia-awg-legacy',
     'xray': 'amnezia-xray',
+    'telemt': 'telemt',
 }
 
 
@@ -1117,6 +1156,10 @@ async def api_server_config(request: Request, server_id: int, req: ProtocolReque
             data_json = mgr._get_server_json()
             import json as _json
             config = _json.dumps(data_json, indent=2, ensure_ascii=False) if data_json else ''
+        elif req.protocol == 'telemt':
+            from telemt_manager import TelemtManager
+            mgr = TelemtManager(ssh)
+            config = mgr._get_server_config()
         else:
             mgr = AWGManager(ssh)
             config = mgr._get_server_config(req.protocol)
@@ -1149,6 +1192,10 @@ async def api_server_config_save(request: Request, server_id: int, req: ServerCo
                 ssh.disconnect()
                 return JSONResponse({'error': f'Invalid JSON format: {str(e)}'}, status_code=400)
             mgr._save_server_json(data_json)
+        elif req.protocol == 'telemt':
+            from telemt_manager import TelemtManager
+            mgr = TelemtManager(ssh)
+            mgr.save_server_config(req.protocol, req.config)
         else:
             mgr = AWGManager(ssh)
             mgr.save_server_config(req.protocol, req.config)
@@ -1212,7 +1259,16 @@ async def api_add_connection(request: Request, server_id: int, req: AddConnectio
         ssh = get_ssh(server)
         ssh.connect()
         manager = get_protocol_manager(ssh, req.protocol)
-        result = manager.add_client(req.protocol, req.name, server['host'], port)
+        
+        if req.protocol == 'telemt':
+            result = manager.add_client(
+                req.protocol, req.name, server['host'], port,
+                telemt_quota=req.telemt_quota,
+                telemt_max_ips=req.telemt_max_ips,
+                telemt_expiry=req.telemt_expiry
+            )
+        else:
+            result = manager.add_client(req.protocol, req.name, server['host'], port)
         ssh.disconnect()
 
         if result.get('config'):
@@ -1263,6 +1319,34 @@ async def api_remove_connection(request: Request, server_id: int, req: Connectio
         return {'status': 'success'}
     except Exception as e:
         logger.exception("Error removing connection")
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
+@app.post('/api/servers/{server_id}/connections/edit')
+async def api_edit_connection(request: Request, server_id: int, req: EditConnectionRequest):
+    if not _check_admin(request):
+        return JSONResponse({'error': 'Forbidden'}, status_code=403)
+    try:
+        data = load_data()
+        if server_id >= len(data['servers']):
+            return JSONResponse({'error': 'Server not found'}, status_code=404)
+        server = data['servers'][server_id]
+        
+        ssh = get_ssh(server)
+        ssh.connect()
+        manager = get_protocol_manager(ssh, req.protocol)
+        
+        edit_params = {}
+        if req.protocol == 'telemt':
+            edit_params['telemt_quota'] = req.telemt_quota
+            edit_params['telemt_max_ips'] = req.telemt_max_ips
+            edit_params['telemt_expiry'] = req.telemt_expiry
+            
+        result = manager.edit_client(req.protocol, req.client_id, edit_params)
+        ssh.disconnect()
+        return result
+    except Exception as e:
+        logger.exception("Error editing connection")
         return JSONResponse({'error': str(e)}, status_code=500)
 
 

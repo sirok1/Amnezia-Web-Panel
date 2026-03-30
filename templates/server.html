@@ -2,6 +2,18 @@
 
 {% block title_extra %} — {{ server.name }}{% endblock %}
 
+{% block head_extra %}
+<style>
+    .client-actions {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        gap: var(--space-xs) !important;
+        align-items: center;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <a href="/" class="back-link">{{ _('back_to_servers') }}</a>
 
@@ -132,6 +144,29 @@
             </button>
         </div>
     </div>
+
+    <!-- Telemt Card -->
+    <div class="card card-hover protocol-card protocol-telemt" id="proto-telemt">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:var(--space-sm);">
+            <div class="protocol-icon">✈</div>
+            <div class="flex gap-sm" id="telemt-ctrl" style="display:none!important;"></div>
+        </div>
+        <div class="protocol-name">Telemt (Telegram Proxy)</div>
+        <div class="protocol-desc">
+            {{ _('telemt_desc') }}
+        </div>
+        <div class="protocol-status" id="telemt-status">
+            <span class="badge badge-warn"><span class="badge-dot"></span> {{ _('not_checked') }}</span>
+        </div>
+        <div id="telemt-info" class="hidden">
+            <div class="protocol-info" id="telemt-info-grid"></div>
+        </div>
+        <div class="flex gap-sm" id="telemt-actions">
+            <button class="btn btn-primary btn-sm" onclick="openInstallModal('telemt')" id="telemt-install-btn" style="flex:1">
+                {{ _('install') }}
+            </button>
+        </div>
+    </div>
 </div>
 
 <!-- Connections Section (renamed from Clients) -->
@@ -148,8 +183,9 @@
                 <option value="awg2">AmneziaWG 2.0</option>
                 <option value="awg_legacy">AWG Legacy</option>
                 <option value="xray">Xray</option>
+                <option value="telemt">Telemt</option>
             </select>
-            <button class="btn btn-primary btn-sm" onclick="openModal('addConnectionModal')">
+            <button class="btn btn-primary btn-sm" onclick="openAddConnectionModal()">
                 <span>＋</span> {{ _('add') }}
             </button>
         </div>
@@ -184,6 +220,27 @@
                 <div class="form-hint" id="installPortHint">{{ _('port_default_hint') }}</div>
             </div>
 
+            <div id="telemtOptions" style="display:none; padding: var(--space-md); background: rgba(0,0,0,0.03); border-radius: var(--radius-md); margin-bottom: var(--space-md);">
+                <div class="form-group">
+                    <label class="form-label" style="display:flex; justify-content:space-between; align-items:center;">
+                        {{ _('tls_emulation') }}
+                        <label class="switch">
+                            <input type="checkbox" id="installTelemtTls" checked onchange="document.getElementById('telemtDomainGroup').style.display = this.checked ? 'block' : 'none'">
+                            <span class="slider"></span>
+                        </label>
+                    </label>
+                </div>
+                <div class="form-group" id="telemtDomainGroup">
+                    <label class="form-label">{{ _('tls_domain') }}</label>
+                    <input class="form-input" type="text" id="installTelemtDomain" value="petrovich.ru">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">{{ _('max_connections_limit') }}</label>
+                    <input class="form-input" type="number" id="installTelemtMaxConns" value="0" min="0">
+                    <div class="form-hint">{{ _('max_connections_hint') }}</div>
+                </div>
+            </div>
+
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeModal('installModal')">{{ _('cancel') }}</button>
                 <button class="btn btn-primary" onclick="installProtocol()" id="installBtn">
@@ -212,11 +269,11 @@
 <div class="modal-backdrop" id="addConnectionModal">
     <div class="modal">
         <div class="modal-header">
-            <h2 class="modal-title">{{ _('add_connection') }}</h2>
+            <h2 class="modal-title" id="addConnectionModalTitle">{{ _('add_connection') }}</h2>
             <button class="modal-close" onclick="closeModal('addConnectionModal')">×</button>
         </div>
 
-        <div class="form-group">
+        <div class="form-group" id="connectionNameGroup">
             <label class="form-label">{{ _('connection_name') }}</label>
             <input class="form-input" type="text" id="connectionName"
                 placeholder="{{ _('connection_name_placeholder') }}">
@@ -230,6 +287,21 @@
                 <option value="{{ u.id }}">{{ u.username }} ({{ u.role }})</option>
                 {% endfor %}
             </select>
+        </div>
+
+        <div id="telemtConnOptions" style="display:none; padding: var(--space-md); background: rgba(0,0,0,0.03); border-radius: var(--radius-md); margin-bottom: var(--space-md);">
+            <div class="form-group">
+                <label class="form-label">Quota (Bytes)</label>
+                <input class="form-input" type="number" id="telemtQuota" placeholder="Optional (e.g. 1073741824)" min="0">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Max Unique IPs</label>
+                <input class="form-input" type="number" id="telemtMaxIps" placeholder="Optional (e.g. 16)" min="1">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Expiration Date (ISO 8601)</label>
+                <input class="form-input" type="text" id="telemtExpiry" placeholder="e.g. 2026-12-31T23:59:59Z">
+            </div>
         </div>
 
         <div class="modal-footer">
@@ -341,6 +413,7 @@
         if (p === 'awg2') return 'AmneziaWG 2.0';
         if (p === 'awg_legacy') return 'AWG Legacy';
         if (p === 'xray') return 'Xray';
+        if (p === 'telemt') return 'Telemt';
         return p.toUpperCase();
     }
 
@@ -443,7 +516,7 @@
             if (info.port || info.clients_count !== undefined) {
                 infoEl.classList.remove('hidden');
                 let grid = '';
-                if (info.port) grid += `<div class="protocol-info-item"><span class="protocol-info-label">${_('port')}</span><span class="protocol-info-value">${info.port}/${proto === 'xray' ? 'TCP' : 'UDP'}</span></div>`;
+                if (info.port) grid += `<div class="protocol-info-item"><span class="protocol-info-label">${_('port')}</span><span class="protocol-info-value">${info.port}/${(proto === 'xray' || proto === 'telemt') ? 'TCP' : 'UDP'}</span></div>`;
                 if (info.clients_count !== undefined) grid += `<div class="protocol-info-item"><span class="protocol-info-label">${_('connections')}</span><span class="protocol-info-value">${info.clients_count}</span></div>`;
                 infoGrid.innerHTML = grid;
             }
@@ -565,11 +638,19 @@
         const portInput = document.getElementById('installPort');
         const portLabel = document.getElementById('installPortLabel');
         const portHint = document.getElementById('installPortHint');
+        const telemtOpts = document.getElementById('telemtOptions');
+
+        telemtOpts.style.display = 'none';
 
         if (proto === 'xray') {
             portLabel.textContent = _('port') + ' (TCP)';
             portInput.value = '443';
             portHint.textContent = _('port_xray_hint');
+        } else if (proto === 'telemt') {
+            portLabel.textContent = _('port') + ' (TCP)';
+            portInput.value = '443';
+            portHint.textContent = 'Порт для Telegram-прокси (обычно 443)';
+            telemtOpts.style.display = 'block';
         } else {
             portLabel.textContent = _('port') + ' (UDP)';
             portInput.value = '55424';
@@ -613,9 +694,15 @@
                     stepIdx++;
                 }
             }, 2000);
-            const result = await apiCall(`/api/servers/${SERVER_ID}/install`, 'POST', {
+            const params = {
                 protocol: currentInstallProto, port: port,
-            });
+            };
+            if (currentInstallProto === 'telemt') {
+                params.tls_emulation = document.getElementById('installTelemtTls').checked;
+                params.tls_domain = document.getElementById('installTelemtDomain').value;
+                params.max_connections = parseInt(document.getElementById('installTelemtMaxConns').value) || 0;
+            }
+            const result = await apiCall(`/api/servers/${SERVER_ID}/install`, 'POST', params);
             clearInterval(progressInterval);
             fillEl.style.width = '100%';
             if (result.log) {
@@ -677,24 +764,36 @@
                 emptyEl.classList.remove('hidden');
                 return;
             }
+            window.connectionsStore = {};
             data.clients.forEach((client, idx) => {
                 const userData = client.userData || {};
+                window.connectionsStore[client.clientId] = userData;
                 const name = userData.clientName || `Connection ${idx}`;
                 const created = userData.creationDate || '';
                 const handshake = userData.latestHandshake || '';
                 const received = userData.dataReceived || '';
                 const sent = userData.dataSent || '';
                 const initial = name.charAt(0).toUpperCase();
-                const enabled = userData.enabled !== false;
-                const hasPrivKey = !!userData.clientPrivateKey || proto === 'xray';
+                const enabled = (client.enabled !== undefined) ? client.enabled : (userData.enabled !== false);
+                const hasPrivKey = !!userData.clientPrivateKey || proto === 'xray' || proto === 'telemt';
                 const assignedUser = client.assigned_user || '';
 
                 let metaHtml = '';
                 if (assignedUser) metaHtml += `<span class="badge badge-info" style="font-size:0.65rem;">👤 ${escapeHtml(assignedUser)}</span>`;
                 if (created) metaHtml += `<span>📅 ${formatDate(created)}</span>`;
-                if (handshake) metaHtml += `<span>🤝 ${handshake}</span>`;
-                if (received) metaHtml += `<span class="traffic-badge traffic-down">↓ ${received}</span>`;
-                if (sent) metaHtml += `<span class="traffic-badge traffic-up">↑ ${sent}</span>`;
+                
+                if (proto === 'telemt') {
+                    if (userData.total_octets) metaHtml += `<span class="traffic-badge">📊 ${formatBytes(userData.total_octets)}</span>`;
+                    if (userData.current_connections !== undefined) metaHtml += `<span>🔌 ${userData.current_connections} conns</span>`;
+                    if (userData.active_ips !== undefined) metaHtml += `<span>📍 ${userData.active_ips} IPs</span>`;
+                    if (userData.quota) metaHtml += `<span class="badge" style="font-size:0.65rem;">Quota: ${formatBytes(userData.quota)}</span>`;
+                    if (userData.expiry) metaHtml += `<span class="badge" style="font-size:0.65rem;">⌛ ${formatDate(userData.expiry)}</span>`;
+                } else {
+                    if (handshake) metaHtml += `<span>🤝 ${handshake}</span>`;
+                    if (received) metaHtml += `<span class="traffic-badge traffic-down">↓ ${received}</span>`;
+                    if (sent) metaHtml += `<span class="traffic-badge traffic-up">↑ ${sent}</span>`;
+                }
+                
                 if (!enabled) metaHtml += `<span class="badge badge-danger" style="font-size:0.65rem">${_('stop')}</span>`;
 
                 const disabledStyle = enabled ? '' : 'opacity:0.5;';
@@ -714,7 +813,8 @@
                             </div>
                         </div>
                         <div class="client-actions">
-                            <button class="btn btn-secondary btn-sm btn-icon" onclick="showConnectionConfig('${escapeJs(client.clientId)}', '${escapeJs(name)}', ${!!userData.clientPrivateKey || proto === 'xray'})" title="${_('config')}">📄</button>
+                            <button class="btn btn-secondary btn-sm btn-icon" onclick="showConnectionConfig('${escapeJs(client.clientId)}', '${escapeJs(name)}', ${!!userData.clientPrivateKey || proto === 'xray' || proto === 'telemt'})" title="${_('config')}">📄</button>
+                            ${proto === 'telemt' ? `<button class="btn btn-secondary btn-sm btn-icon" onclick="editConnection('${escapeJs(client.clientId)}')" title="${_('edit')}">✏️</button>` : ''}
                             <button class="btn btn-secondary btn-sm btn-icon" onclick="toggleConnection('${escapeJs(client.clientId)}', ${!enabled})" title="${toggleTitle}">${toggleIcon}</button>
                             <button class="btn btn-danger btn-sm btn-icon" onclick="removeConnection('${escapeJs(client.clientId)}')" title="${_('delete')}">🗑</button>
                         </div>
@@ -738,22 +838,36 @@
         text.textContent = _('creating');
         spinner.classList.remove('hidden');
         try {
-            const result = await apiCall(`/api/servers/${SERVER_ID}/connections/add`, 'POST', {
+            const params = {
                 protocol: proto, name: connName, user_id: userId,
-            });
-            showToast(_('connection_created').replace('{}', connName), 'success');
-            closeModal('addConnectionModal');
-            document.getElementById('connectionName').value = '';
-            if (result.config) {
-                currentConfig = result.config;
-                currentVpnLink = result.vpn_link || '';
-                currentConfigName = connName.replace(/\s+/g, '_');
-                document.getElementById('configModalTitle').textContent = `Конфигурация — ${connName}`;
-                document.getElementById('configText').textContent = result.config;
-                document.getElementById('vpnLinkText').textContent = currentVpnLink;
-                switchConfigTab('conf');
-                openModal('configModal');
-                generateQR(result.config);
+            };
+            if (proto === 'telemt') {
+                params.telemt_quota = document.getElementById('telemtQuota').value || null;
+                params.telemt_max_ips = parseInt(document.getElementById('telemtMaxIps').value) || null;
+                params.telemt_expiry = document.getElementById('telemtExpiry').value || null;
+                if (isEditingConn) params.client_id = editingClientId;
+            }
+            const result = await apiCall(isEditingConn ? `/api/servers/${SERVER_ID}/connections/edit` : `/api/servers/${SERVER_ID}/connections/add`, 'POST', params);
+            if (isEditingConn) {
+                showToast('Подключение обновлено', 'success');
+                closeModal('addConnectionModal');
+            } else {
+                showToast(_('connection_created').replace('{}', connName), 'success');
+                closeModal('addConnectionModal');
+                document.getElementById('connectionName').value = '';
+                if (result.config) {
+                    currentConfig = result.config;
+                    currentVpnLink = result.vpn_link || '';
+                    currentConfigName = connName.replace(/\s+/g, '_');
+                    document.getElementById('configModalTitle').textContent = `Конфигурация — ${connName}`;
+                    document.getElementById('configText').textContent = result.config;
+                    document.getElementById('vpnLinkText').textContent = currentVpnLink;
+                    document.getElementById('panel-vpn').style.display = (proto === 'telemt' ? 'none' : '');
+                    document.querySelectorAll('.config-tab')[1].style.display = (proto === 'telemt' ? 'none' : '');
+                    switchConfigTab('conf');
+                    openModal('configModal');
+                    generateQR(result.config);
+                }
             }
             loadConnections();
         } catch (err) {
@@ -762,6 +876,44 @@
             btn.disabled = false;
             text.textContent = 'Создать';
             spinner.classList.add('hidden');
+        }
+    }
+
+    let isEditingConn = false;
+    let editingClientId = null;
+
+    function openAddConnectionModal(isEdit = false, clientData = null) {
+        isEditingConn = isEdit;
+        const proto = document.getElementById('connProtoSelect').value;
+        const telemtOpts = document.getElementById('telemtConnOptions');
+        
+        document.getElementById('addConnectionModalTitle').textContent = isEdit ? 'Редактировать подключение' : 'Добавить подключение';
+        document.getElementById('addConnBtnText').textContent = isEdit ? 'Сохранить' : 'Создать';
+        document.getElementById('connectionNameGroup').style.display = isEdit ? 'none' : 'block';
+
+        if (proto === 'telemt') {
+            telemtOpts.style.display = 'block';
+            if (isEdit && clientData) {
+                editingClientId = clientData.clientName;
+                document.getElementById('telemtQuota').value = clientData.quota || '';
+                document.getElementById('telemtMaxIps').value = clientData.active_ips || ''; // actually max_ips isn't stored in api data yet, assume it was active_ips for now or better - just empty
+                document.getElementById('telemtExpiry').value = clientData.expiry || '';
+            } else {
+                document.getElementById('telemtQuota').value = '';
+                document.getElementById('telemtMaxIps').value = '';
+                document.getElementById('telemtExpiry').value = '';
+            }
+        } else {
+            telemtOpts.style.display = 'none';
+        }
+        openModal('addConnectionModal');
+    }
+
+    function editConnection(clientId) {
+        const userData = window.connectionsStore[clientId];
+        if (userData) {
+            userData.clientName = clientId;
+            openAddConnectionModal(true, userData);
         }
     }
 
@@ -783,9 +935,9 @@
         const proto = document.getElementById('connProtoSelect').value;
 
         // Restore tabs visibility first
-        document.getElementById('panel-vpn').style.display = '';
+        document.getElementById('panel-vpn').style.display = (proto === 'telemt' ? 'none' : '');
         document.getElementById('panel-qr').style.display = '';
-        document.querySelectorAll('.config-tab')[1].style.display = '';
+        document.querySelectorAll('.config-tab')[1].style.display = (proto === 'telemt' ? 'none' : '');
         document.querySelectorAll('.config-tab')[2].style.display = '';
 
         // Client was created via native Amnezia app — private key is not stored server-side

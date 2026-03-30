@@ -244,5 +244,10 @@
     "invalid_backup_file": "Invalid backup file or structure",
     "config_unavailable": "Configuration unavailable",
     "config_unavailable_desc": "This client was created via the native Amnezia app.\\nThe private key is stored only on the user's device and cannot be recovered by the server.",
-    "client_public_key": "Client public key:"
+    "client_public_key": "Client public key:",
+    "telemt_desc": "MTProxy-based Telegram proxy with advanced obfuscation and TLS emulation support.",
+    "tls_emulation": "TLS Emulation",
+    "tls_domain": "Masking Domain",
+    "max_connections_limit": "Max Connections",
+    "max_connections_hint": "0 for unlimited. Limits total concurrent users."
 }
