@@ -39,28 +39,36 @@ class DNSManager:
 """
             self.ssh.write_file("/opt/amnezia/dns/forward-records.conf", forward_config)
 
-            # When running with --network host on a box where systemd-resolved
-            # already occupies :53, the user picks another port. mvance/unbound's
-            # default config may leave `port:` commented out and encode the port
-            # inside `interface: 0.0.0.0@53`, so a plain replace of `port: 53`
-            # is not enough. Strategy:
-            #   1) delete any active `port: N` directive
-            #   2) strip `@N` from `interface:` lines (so they use the global port)
-            #   3) insert `    port: PORT` right after the `server:` section header
-            port_patch = (
-                f"RUN sed -i -E "
-                f"-e '/^[[:space:]]*port:[[:space:]]+[0-9]+/d' "
-                f"-e 's/^([[:space:]]*interface:[[:space:]]+[^@#[:space:]]+)@[0-9]+/\\1/' "
-                f"-e '/^server:/a\\    port: {effective_port}' "
-                "/opt/unbound/etc/unbound/unbound.conf\n"
-                if effective_port != 53 else ""
-            )
+            # Write a minimal unbound.conf with our port baked in and replace the
+            # image default outright. This sidesteps sed/awk portability (busybox
+            # vs GNU) and any `port: 53` / `interface: ...@53` combinations in
+            # the base image's default config.
+            unbound_conf = f"""server:
+    verbosity: 0
+    port: {effective_port}
+    interface: 0.0.0.0
+    do-ip4: yes
+    do-ip6: no
+    do-udp: yes
+    do-tcp: yes
+    access-control: 0.0.0.0/0 allow
+    hide-identity: yes
+    hide-version: yes
+    qname-minimisation: yes
+    prefetch: yes
+    cache-min-ttl: 0
+    cache-max-ttl: 86400
 
-            dockerfile = f"""
+include: "/opt/unbound/etc/unbound/forward-records.conf"
+"""
+            self.ssh.write_file("/opt/amnezia/dns/unbound.conf", unbound_conf)
+
+            dockerfile = """
 FROM mvance/unbound:latest
 LABEL maintainer="AmneziaVPN"
 COPY forward-records.conf /opt/unbound/etc/unbound/forward-records.conf
-{port_patch}"""
+COPY unbound.conf /opt/unbound/etc/unbound/unbound.conf
+"""
             self.ssh.write_file("/opt/amnezia/dns/Dockerfile", dockerfile)
 
             # 4. Build and run
