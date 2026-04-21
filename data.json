@@ -1,0 +1,46 @@
+{
+  "servers": [],
+  "users": [
+    {
+      "id": "3a4132e8-3f44-4725-aff3-3c3dae26360e",
+      "username": "admin",
+      "password_hash": "5b918a6035735c670e7fbc8972ae2385$18be2a559f674d9a56e89b6ee0a8b6017f54ced25ae6e956643856a896d12f61",
+      "role": "admin",
+      "enabled": true,
+      "created_at": "2026-04-20T23:55:05.364275",
+      "share_enabled": false,
+      "share_token": "kF7wPJt0mEZ2_JsR2neAzQ",
+      "share_password_hash": null,
+      "traffic_reset_strategy": "never",
+      "traffic_total": 0,
+      "last_reset_at": "2026-04-20T23:55:05.364416",
+      "expiration_date": null
+    }
+  ],
+  "user_connections": [],
+  "settings": {
+    "appearance": {
+      "title": "Amnezia",
+      "logo": "❤️",
+      "subtitle": "Web Panel"
+    },
+    "sync": {
+      "remnawave_url": "",
+      "remnawave_api_key": "",
+      "remnawave_sync": false,
+      "remnawave_sync_users": false,
+      "remnawave_create_conns": false,
+      "remnawave_server_id": 0,
+      "remnawave_protocol": "awg"
+    },
+    "ssl": {
+      "enabled": false,
+      "domain": "",
+      "cert_path": "",
+      "key_path": "",
+      "cert_text": "",
+      "key_text": "",
+      "panel_port": 5000
+    }
+  }
+}
