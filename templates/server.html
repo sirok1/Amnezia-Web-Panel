@@ -325,6 +325,17 @@
                 </div>
             </div>
 
+            <div class="form-group" id="egressIfaceGroup" style="display:none;">
+                <label class="form-label">Egress interface</label>
+                <input class="form-input" type="text" id="installEgressIface" placeholder="ens3">
+                <div class="form-hint">
+                    Интерфейс хоста, через который уходит внешний трафик — для MASQUERADE
+                    VPN-подсети. Узнать: <code>ip -o route show default | awk '{print $5}'</code>.
+                    Оставьте пустым — скрипт определит сам. Hardcoded <code>eth0/eth1</code>
+                    почти наверняка не подходит (современные VPS используют <code>ens3</code>/<code>enp*</code>).
+                </div>
+            </div>
+
             <div id="telemtOptions"
                 style="display:none; padding: var(--space-md); background: rgba(0,0,0,0.03); border-radius: var(--radius-md); margin-bottom: var(--space-md);">
                 <div class="form-group">
@@ -865,6 +876,15 @@
         // Checkbox makes sense only for protocols where we actually pass host_network through.
         hostNetGroup.style.display = ['awg', 'awg2', 'awg_legacy', 'wireguard', 'dns'].includes(proto) ? '' : 'none';
 
+        const egressGroup = document.getElementById('egressIfaceGroup');
+        const egressInput = document.getElementById('installEgressIface');
+        egressInput.value = '';
+        const egressApplies = ['awg', 'awg2', 'awg_legacy', 'wireguard'].includes(proto);
+        const syncEgressVisibility = () => {
+            egressGroup.style.display = (egressApplies && hostNetInput.checked) ? '' : 'none';
+        };
+        syncEgressVisibility();
+
         if (proto === 'dns') {
             const applyDnsMode = () => {
                 if (hostNetInput.checked) {
@@ -877,6 +897,7 @@
                     portInput.disabled = true;
                     portHint.textContent = 'Сервис будет запущен во внутренней сети (172.29.172.254) без привязки к портам хоста.';
                 }
+                syncEgressVisibility();
             };
             portInput.value = '53';
             applyDnsMode();
@@ -896,6 +917,10 @@
             portInput.value = '55424';
             portInput.disabled = false;
             portHint.textContent = _('port_default_hint');
+        }
+
+        if (proto !== 'dns') {
+            hostNetInput.onchange = syncEgressVisibility;
         }
 
         document.getElementById('installForm').classList.remove('hidden');
@@ -938,6 +963,7 @@
             const params = {
                 protocol: currentInstallProto, port: port,
                 host_network: document.getElementById('installHostNetwork').checked,
+                egress_interface: document.getElementById('installEgressIface').value.trim(),
             };
             if (currentInstallProto === 'telemt') {
                 params.tls_emulation = document.getElementById('installTelemtTls').checked;

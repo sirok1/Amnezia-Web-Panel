@@ -241,7 +241,7 @@ iptables -C FORWARD -j DOCKER-USER 2>/dev/null || iptables -A FORWARD -j DOCKER-
         self.ssh.run_sudo_script(script)
         return True
 
-    def install_protocol(self, protocol_type, port=None, awg_params=None, host_network=False):
+    def install_protocol(self, protocol_type, port=None, awg_params=None, host_network=False, egress_iface=None):
         """
         Full installation of AWG or AWG-Legacy protocol.
         Steps: install docker -> prepare host -> build container ->
@@ -363,7 +363,7 @@ iptables -C FORWARD -j DOCKER-USER 2>/dev/null || iptables -A FORWARD -j DOCKER-
 
         # Step 7: Upload and run start script
         results.append("Starting AWG service...")
-        self._upload_start_script(protocol_type, port, awg_params)
+        self._upload_start_script(protocol_type, port, awg_params, egress_iface=egress_iface)
         results.append("AWG service started")
 
         # Step 8: Setup firewall
@@ -489,7 +489,7 @@ EOF
         if code != 0:
             raise RuntimeError(f"Failed to configure container: {err}")
 
-    def _upload_start_script(self, protocol_type, port, awg_params):
+    def _upload_start_script(self, protocol_type, port, awg_params, egress_iface=None):
         """Upload and execute the start script inside the container."""
         container_name = self._container_name(protocol_type)
         quick_bin = self._quick_binary(protocol_type)
@@ -497,6 +497,7 @@ EOF
         subnet_ip = AWG_DEFAULTS['subnet_ip']
         subnet_cidr = AWG_DEFAULTS['subnet_cidr']
 
+        egress_override = (egress_iface or '').strip()
         start_script = f"""#!/bin/bash
 echo "Container startup"
 
@@ -512,14 +513,23 @@ iptables -A INPUT -i $IFACE -j ACCEPT
 iptables -A FORWARD -i $IFACE -j ACCEPT
 iptables -A OUTPUT -o $IFACE -j ACCEPT
 
-# Allow forwarding traffic only from the VPN
-iptables -A FORWARD -i $IFACE -o eth0 -s {subnet_ip}/{subnet_cidr} -j ACCEPT
-iptables -A FORWARD -i $IFACE -o eth1 -s {subnet_ip}/{subnet_cidr} -j ACCEPT
+# Egress interface for NAT. Explicit override wins; otherwise pick the
+# default route's interface (host-mode usually ens3/enp*, bridged mode eth0).
+EGRESS="{egress_override}"
+if [ -z "$EGRESS" ]; then
+    EGRESS=$(ip -o route show default 2>/dev/null | awk '{{print $5; exit}}')
+fi
+if [ -z "$EGRESS" ]; then
+    EGRESS="eth0 eth1"
+fi
+echo "NAT egress interface(s): $EGRESS"
+
+for EG in $EGRESS; do
+    iptables -A FORWARD -i $IFACE -o $EG -s {subnet_ip}/{subnet_cidr} -j ACCEPT
+    iptables -t nat -A POSTROUTING -s {subnet_ip}/{subnet_cidr} -o $EG -j MASQUERADE
+done
 
 iptables -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT
-
-iptables -t nat -A POSTROUTING -s {subnet_ip}/{subnet_cidr} -o eth0 -j MASQUERADE
-iptables -t nat -A POSTROUTING -s {subnet_ip}/{subnet_cidr} -o eth1 -j MASQUERADE
 
 tail -f /dev/null
 """

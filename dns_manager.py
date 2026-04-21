@@ -39,12 +39,19 @@ class DNSManager:
 """
             self.ssh.write_file("/opt/amnezia/dns/forward-records.conf", forward_config)
 
-            # When running with --network host on a box where systemd-resolved (or
-            # anything else) already occupies :53, the user can pick another port;
-            # we rewrite unbound.conf's `port:` directive so the daemon actually
-            # binds there.
+            # When running with --network host on a box where systemd-resolved
+            # already occupies :53, the user picks another port. mvance/unbound's
+            # default config may leave `port:` commented out and encode the port
+            # inside `interface: 0.0.0.0@53`, so a plain replace of `port: 53`
+            # is not enough. Strategy:
+            #   1) delete any active `port: N` directive
+            #   2) strip `@N` from `interface:` lines (so they use the global port)
+            #   3) insert `    port: PORT` right after the `server:` section header
             port_patch = (
-                f"RUN sed -i 's/^[[:space:]]*port:[[:space:]]*53[[:space:]]*$/    port: {effective_port}/' "
+                f"RUN sed -i -E "
+                f"-e '/^[[:space:]]*port:[[:space:]]+[0-9]+/d' "
+                f"-e 's/^([[:space:]]*interface:[[:space:]]+[^@#[:space:]]+)@[0-9]+/\\1/' "
+                f"-e '/^server:/a\\    port: {effective_port}' "
                 "/opt/unbound/etc/unbound/unbound.conf\n"
                 if effective_port != 53 else ""
             )

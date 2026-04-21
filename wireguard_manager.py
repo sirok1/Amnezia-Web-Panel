@@ -137,7 +137,7 @@ iptables -C FORWARD -j DOCKER-USER 2>/dev/null || iptables -A FORWARD -j DOCKER-
         self.ssh.run_sudo_script(script)
         return True
 
-    def install_protocol(self, port=None, host_network=False):
+    def install_protocol(self, port=None, host_network=False, egress_iface=None):
         """
         Full installation of WireGuard protocol.
         Steps: install docker -> prepare host -> build container ->
@@ -248,7 +248,7 @@ iptables -C FORWARD -j DOCKER-USER 2>/dev/null || iptables -A FORWARD -j DOCKER-
 
         # Step 7: Upload start script
         results.append("Starting WireGuard service...")
-        self._upload_start_script(port)
+        self._upload_start_script(port, egress_iface=egress_iface)
         results.append("WireGuard service started")
 
         # Step 8: Setup firewall
@@ -315,11 +315,12 @@ EOF
         if code != 0:
             raise RuntimeError(f"Failed to configure container: {err}")
 
-    def _upload_start_script(self, port):
+    def _upload_start_script(self, port, egress_iface=None):
         """Upload and execute the start script inside the container."""
         subnet_ip = WG_DEFAULTS['subnet_ip']
         subnet_cidr = WG_DEFAULTS['subnet_cidr']
 
+        egress_override = (egress_iface or '').strip()
         start_script = f"""#!/bin/bash
 echo "WireGuard container startup"
 
@@ -334,13 +335,23 @@ iptables -A INPUT -i {self.INTERFACE} -j ACCEPT
 iptables -A FORWARD -i {self.INTERFACE} -j ACCEPT
 iptables -A OUTPUT -o {self.INTERFACE} -j ACCEPT
 
-iptables -A FORWARD -i {self.INTERFACE} -o eth0 -s {subnet_ip}/{subnet_cidr} -j ACCEPT
-iptables -A FORWARD -i {self.INTERFACE} -o eth1 -s {subnet_ip}/{subnet_cidr} -j ACCEPT
+# Egress interface for NAT. Explicit override wins; otherwise pick the
+# default route's interface (host-mode usually ens3/enp*, bridged mode eth0).
+EGRESS="{egress_override}"
+if [ -z "$EGRESS" ]; then
+    EGRESS=$(ip -o route show default 2>/dev/null | awk '{{print $5; exit}}')
+fi
+if [ -z "$EGRESS" ]; then
+    EGRESS="eth0 eth1"
+fi
+echo "NAT egress interface(s): $EGRESS"
+
+for EG in $EGRESS; do
+    iptables -A FORWARD -i {self.INTERFACE} -o $EG -s {subnet_ip}/{subnet_cidr} -j ACCEPT
+    iptables -t nat -A POSTROUTING -s {subnet_ip}/{subnet_cidr} -o $EG -j MASQUERADE
+done
 
 iptables -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT
-
-iptables -t nat -A POSTROUTING -s {subnet_ip}/{subnet_cidr} -o eth0 -j MASQUERADE
-iptables -t nat -A POSTROUTING -s {subnet_ip}/{subnet_cidr} -o eth1 -j MASQUERADE
 
 tail -f /dev/null
 """

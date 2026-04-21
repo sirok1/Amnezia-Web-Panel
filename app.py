@@ -498,6 +498,7 @@ class InstallProtocolRequest(BaseModel):
     tls_domain: Optional[str] = None
     max_connections: Optional[int] = None
     host_network: Optional[bool] = False
+    egress_interface: Optional[str] = None
 
 
 class ProtocolRequest(BaseModel):
@@ -1236,6 +1237,7 @@ async def api_install_protocol(request: Request, server_id: int, req: InstallPro
         manager = get_protocol_manager(ssh, req.protocol)
 
         host_network = bool(req.host_network)
+        egress_iface = (req.egress_interface or '').strip() or None
 
         # Pass parameters to installer
         if req.protocol == 'telemt':
@@ -1249,16 +1251,17 @@ async def api_install_protocol(request: Request, server_id: int, req: InstallPro
         elif req.protocol == 'xray':
             result = manager.install_protocol(port=req.port)
         elif req.protocol == 'wireguard':
-            result = manager.install_protocol(port=req.port, host_network=host_network)
+            result = manager.install_protocol(port=req.port, host_network=host_network, egress_iface=egress_iface)
         elif req.protocol == 'dns':
             result = manager.install_protocol(req.protocol, port=req.port, host_network=host_network)
         else:
-            result = manager.install_protocol(req.protocol, port=req.port, host_network=host_network)
+            result = manager.install_protocol(req.protocol, port=req.port, host_network=host_network, egress_iface=egress_iface)
 
         server['protocols'][req.protocol] = {
             'installed': True, 'port': req.port,
             'awg_params': result.get('awg_params', {}),
             'host_network': host_network,
+            'egress_interface': egress_iface,
         }
         save_data(data)
         ssh.disconnect()
