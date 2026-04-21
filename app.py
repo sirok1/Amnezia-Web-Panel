@@ -1181,6 +1181,8 @@ async def api_check_server(request: Request, server_id: int):
                 db_proto = server.get('protocols', {}).get(proto, {})
                 if not result.get('port') and db_proto.get('port'):
                     result['port'] = db_proto['port']
+                if 'host_network' not in result and 'host_network' in db_proto:
+                    result['host_network'] = db_proto['host_network']
                 return proto, result, None
             except Exception as e:
                 return proto, None, str(e)
@@ -1256,6 +1258,7 @@ async def api_install_protocol(request: Request, server_id: int, req: InstallPro
         server['protocols'][req.protocol] = {
             'installed': True, 'port': req.port,
             'awg_params': result.get('awg_params', {}),
+            'host_network': host_network,
         }
         save_data(data)
         ssh.disconnect()

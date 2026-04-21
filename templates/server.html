@@ -695,7 +695,10 @@
                 let grid = '';
                 if (info.port) {
                     if (proto === 'dns') {
-                        grid += `<div class="protocol-info-item"><span class="protocol-info-label">${_('port')}</span><span class="protocol-info-value">172.29.172.254:53 (Internal)</span></div>`;
+                        const dnsLabel = info.host_network
+                            ? `:${info.port} (Host)`
+                            : `172.29.172.254:${info.port || 53} (Internal)`;
+                        grid += `<div class="protocol-info-item"><span class="protocol-info-label">${_('port')}</span><span class="protocol-info-value">${dnsLabel}</span></div>`;
                     } else {
                         grid += `<div class="protocol-info-item"><span class="protocol-info-label">${_('port')}</span><span class="protocol-info-value">${info.port}/${(proto === 'xray' || proto === 'telemt') ? 'TCP' : 'UDP'}</span></div>`;
                     }
@@ -858,14 +861,26 @@
 
         telemtOpts.style.display = 'none';
         hostNetInput.checked = false;
+        hostNetInput.onchange = null;
         // Checkbox makes sense only for protocols where we actually pass host_network through.
         hostNetGroup.style.display = ['awg', 'awg2', 'awg_legacy', 'wireguard', 'dns'].includes(proto) ? '' : 'none';
 
         if (proto === 'dns') {
-            portLabel.textContent = _('port') + ' (Internal)';
+            const applyDnsMode = () => {
+                if (hostNetInput.checked) {
+                    portLabel.textContent = _('port') + ' (Host)';
+                    portInput.disabled = false;
+                    portHint.textContent = 'Контейнер с --network host: если на хосте занят :53 (systemd-resolved), выберите свободный порт, например 5353.';
+                } else {
+                    portLabel.textContent = _('port') + ' (Internal)';
+                    portInput.value = '53';
+                    portInput.disabled = true;
+                    portHint.textContent = 'Сервис будет запущен во внутренней сети (172.29.172.254) без привязки к портам хоста.';
+                }
+            };
             portInput.value = '53';
-            portInput.disabled = true;
-            portHint.textContent = 'Сервис будет запущен во внутренней сети (172.29.172.254) без привязки к портам хоста.';
+            applyDnsMode();
+            hostNetInput.onchange = applyDnsMode;
         } else if (proto === 'xray') {
             portLabel.textContent = _('port') + ' (TCP)';
             portInput.disabled = false;
