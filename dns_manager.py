@@ -8,7 +8,7 @@ class DNSManager:
     def __init__(self, ssh):
         self.ssh = ssh
 
-    def install_protocol(self, protocol_type='dns', port='53'):
+    def install_protocol(self, protocol_type='dns', port='53', host_network=False):
         """Install AmneziaDNS service."""
         try:
             # 1. Check if docker is installed
@@ -41,17 +41,23 @@ COPY forward-records.conf /opt/unbound/etc/unbound/forward-records.conf
             self.ssh.run_sudo_command("docker stop amnezia-dns || true")
             self.ssh.run_sudo_command("docker rm amnezia-dns || true")
             
-            # Create internal network for DNS (like original Amnezia client)
-            self.ssh.run_sudo_command("docker network ls | grep -q amnezia-dns-net || docker network create --subnet 172.29.172.0/24 amnezia-dns-net")
-            
-            # Use internal network with static IP. Do not expose 53 on host to avoid systemd-resolved conflict.
-            cmd = "docker run -d --name amnezia-dns --restart always --network amnezia-dns-net --ip=172.29.172.254 amnezia-dns"
-            self.ssh.run_sudo_command(cmd)
+            if host_network:
+                # Host network mode — DNS listens on the host's port 53 directly.
+                # Caller is responsible for ensuring systemd-resolved is not occupying :53.
+                cmd = "docker run -d --name amnezia-dns --restart always --network host amnezia-dns"
+                self.ssh.run_sudo_command(cmd)
+            else:
+                # Create internal network for DNS (like original Amnezia client)
+                self.ssh.run_sudo_command("docker network ls | grep -q amnezia-dns-net || docker network create --subnet 172.29.172.0/24 amnezia-dns-net")
 
-            # Connect existing VPN containers to the DNS network
-            vpn_containers = ['amnezia-awg', 'amnezia-awg2', 'amnezia-awg-legacy', 'amnezia-xray', 'telemt']
-            for c in vpn_containers:
-                self.ssh.run_sudo_command(f"docker ps | grep -q {c} && docker network connect amnezia-dns-net {c} || true")
+                # Use internal network with static IP. Do not expose 53 on host to avoid systemd-resolved conflict.
+                cmd = "docker run -d --name amnezia-dns --restart always --network amnezia-dns-net --ip=172.29.172.254 amnezia-dns"
+                self.ssh.run_sudo_command(cmd)
+
+                # Connect existing VPN containers to the DNS network
+                vpn_containers = ['amnezia-awg', 'amnezia-awg2', 'amnezia-awg-legacy', 'amnezia-xray', 'telemt']
+                for c in vpn_containers:
+                    self.ssh.run_sudo_command(f"docker ps | grep -q {c} && docker network connect amnezia-dns-net {c} || true")
 
             return {"status": "success", "message": "AmneziaDNS installed successfully"}
         except Exception as e:

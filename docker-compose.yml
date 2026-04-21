@@ -1,8 +1,9 @@
-version: '3.8'
-
 services:
   amnezia_panel:
-    image: prvtpro/amnezia-panel:1.4.0
+    #image:  prvtpro/amnezia-panel:1.4.2
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: amnezia_panel
     # To connect the (Traefik) balancer, assign one network to both containers and uncomment the labels by replacing the domain with your own.
     # labels:
@@ -20,3 +21,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+        #volumes:
+      # - ./data.json:/app/data.json
+        #   - /etc/letsencrypt/:/root/cert/

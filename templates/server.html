@@ -310,6 +310,21 @@
                 <div class="form-hint" id="installPortHint">{{ _('port_default_hint') }}</div>
             </div>
 
+            <div class="form-group" id="hostNetworkGroup">
+                <label class="form-label" style="display:flex; justify-content:space-between; align-items:center;">
+                    Network mode host
+                    <label class="switch">
+                        <input type="checkbox" id="installHostNetwork">
+                        <span class="slider"></span>
+                    </label>
+                </label>
+                <div class="form-hint">
+                    Запускает контейнер с <code>--network host</code> (нужно для tproxy).
+                    В этом режиме порты публикуются напрямую на хосте, а sysctl
+                    <code>net.ipv4.conf.all.src_valid_mark=1</code> выставляется на самом хосте.
+                </div>
+            </div>
+
             <div id="telemtOptions"
                 style="display:none; padding: var(--space-md); background: rgba(0,0,0,0.03); border-radius: var(--radius-md); margin-bottom: var(--space-md);">
                 <div class="form-group">
@@ -838,8 +853,13 @@
         const portLabel = document.getElementById('installPortLabel');
         const portHint = document.getElementById('installPortHint');
         const telemtOpts = document.getElementById('telemtOptions');
+        const hostNetGroup = document.getElementById('hostNetworkGroup');
+        const hostNetInput = document.getElementById('installHostNetwork');
 
         telemtOpts.style.display = 'none';
+        hostNetInput.checked = false;
+        // Checkbox makes sense only for protocols where we actually pass host_network through.
+        hostNetGroup.style.display = ['awg', 'awg2', 'awg_legacy', 'wireguard', 'dns'].includes(proto) ? '' : 'none';
 
         if (proto === 'dns') {
             portLabel.textContent = _('port') + ' (Internal)';
@@ -902,6 +922,7 @@
             }, 2000);
             const params = {
                 protocol: currentInstallProto, port: port,
+                host_network: document.getElementById('installHostNetwork').checked,
             };
             if (currentInstallProto === 'telemt') {
                 params.tls_emulation = document.getElementById('installTelemtTls').checked;

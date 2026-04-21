@@ -49,9 +49,9 @@ else:
 DATA_FILE = os.path.join(application_path, 'data.json')
 CURRENT_VERSION = "v1.4.2"
 
-
 # ======================== Translations ========================
 TRANSLATIONS = {}
+
 
 def load_translations():
     global TRANSLATIONS
@@ -67,12 +67,13 @@ def load_translations():
                     logger.error(f"Error loading translation {f}: {e}")
     logger.info(f"Loaded translations: {list(TRANSLATIONS.keys())}")
 
+
 def _t(text_id, lang='en'):
     lang_batch = TRANSLATIONS.get(lang, TRANSLATIONS.get('en', {}))
     return lang_batch.get(text_id, text_id)
 
-load_translations()
 
+load_translations()
 
 # ======================== Helpers ========================
 
@@ -196,11 +197,11 @@ async def perform_delete_user(data: dict, user_id: str):
     data['users'] = [u for u in data['users'] if u['id'] != user_id]
     return True
 
-
     return True
 
 
-async def perform_mass_operations(delete_uids: List[str] = None, toggle_uids: List[tuple] = None, create_conns: List[dict] = None):
+async def perform_mass_operations(delete_uids: List[str] = None, toggle_uids: List[tuple] = None,
+                                  create_conns: List[dict] = None):
     """
     Executes multiple SSH operations efficiently.
     Reloads data inside to ensure we don't overwrite other changes.
@@ -217,7 +218,7 @@ async def perform_mass_operations(delete_uids: List[str] = None, toggle_uids: Li
         for uid in delete_uids:
             conns = [c for c in data.get('user_connections', []) if c['user_id'] == uid]
             for c in conns: get_ops(c['server_id'])['delete'].append(c)
-    
+
     if toggle_uids:
         for uid, enabled in toggle_uids:
             conns = [c for c in data.get('user_connections', []) if c['user_id'] == uid]
@@ -232,11 +233,11 @@ async def perform_mass_operations(delete_uids: List[str] = None, toggle_uids: Li
         current_data = load_data()
         if srv_id >= len(current_data['servers']): return
         srv = current_data['servers'][srv_id]
-        
+
         try:
             ssh = get_ssh(srv)
             await asyncio.to_thread(ssh.connect)
-            
+
             # 1. Deletes
             for c in ops['delete']:
                 manager = get_protocol_manager(ssh, c['protocol'])
@@ -244,9 +245,10 @@ async def perform_mass_operations(delete_uids: List[str] = None, toggle_uids: Li
                 # Incremental delete from data
                 async with DATA_LOCK:
                     current_data = load_data()
-                    current_data['user_connections'] = [conn for conn in current_data['user_connections'] if conn['id'] != c['id']]
+                    current_data['user_connections'] = [conn for conn in current_data['user_connections'] if
+                                                        conn['id'] != c['id']]
                     save_data(current_data)
-            
+
             # 2. Toggles
             for c, enabled in ops['toggle']:
                 manager = get_protocol_manager(ssh, c['protocol'])
@@ -255,21 +257,22 @@ async def perform_mass_operations(delete_uids: List[str] = None, toggle_uids: Li
                 async with DATA_LOCK:
                     current_data = load_data()
                     # We also need to update user status if it was a user toggle
-                    # Wait, mass ops caller usually handles user enabled status. 
+                    # Wait, mass ops caller usually handles user enabled status.
                     # Here we just toggle the actual wireguard peer.
                     save_data(current_data)
-            
+
             # 3. Creates
             for c_req in ops['create']:
                 proto_info = srv.get('protocols', {}).get(c_req['protocol'], {})
                 port = proto_info.get('port', '55424')
                 manager = get_protocol_manager(ssh, c_req['protocol'])
-                
+
                 if c_req['protocol'] == 'wireguard':
                     res = await asyncio.to_thread(manager.add_client, c_req['name'], srv['host'])
                 else:
-                    res = await asyncio.to_thread(_manager_call, manager, 'add_client', c_req['protocol'], c_req['name'], srv['host'], port)
-                
+                    res = await asyncio.to_thread(_manager_call, manager, 'add_client', c_req['protocol'],
+                                                  c_req['name'], srv['host'], port)
+
                 if res.get('client_id'):
                     new_conn = {
                         'id': str(uuid.uuid4()),
@@ -284,7 +287,7 @@ async def perform_mass_operations(delete_uids: List[str] = None, toggle_uids: Li
                         current_data = load_data()
                         current_data['user_connections'].append(new_conn)
                         save_data(current_data)
-            
+
             await asyncio.to_thread(ssh.disconnect)
         except Exception as e:
             logger.error(f"Mass ops failed for server {srv_id}: {e}")
@@ -299,7 +302,8 @@ async def perform_mass_operations(delete_uids: List[str] = None, toggle_uids: Li
         current_data = load_data()
         if delete_uids:
             current_data['users'] = [u for u in current_data['users'] if u['id'] not in delete_uids]
-            current_data['user_connections'] = [c for c in current_data.get('user_connections', []) if c['user_id'] not in delete_uids]
+            current_data['user_connections'] = [c for c in current_data.get('user_connections', []) if
+                                                c['user_id'] not in delete_uids]
         if toggle_uids:
             for uid, enabled in toggle_uids:
                 user = next((u for u in current_data['users'] if u['id'] == uid), None)
@@ -313,15 +317,15 @@ async def sync_users_with_remnawave(data: dict):
     settings = data.get('settings', {}).get('sync', {})
     if not settings.get('remnawave_sync_users'):
         return 0, "Synchronization is disabled in settings"
-    
+
     url = settings.get('remnawave_url')
     api_key = settings.get('remnawave_api_key')
     if not url or not api_key:
         return 0, "Remnawave URL or API Key not configured"
-    
+
     api_url = url.rstrip('/') + '/api/users'
     headers = {"Authorization": f"Bearer {api_key}"}
-    
+
     try:
         rw_users = []
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -331,40 +335,40 @@ async def sync_users_with_remnawave(data: dict):
                 resp = await client.get(f"{api_url}?size={page_size}&start={current_start}", headers=headers)
                 if resp.status_code != 200:
                     return 0, f"Remnawave API error: {resp.status_code} {resp.text}"
-                
+
                 page_data = resp.json()
                 response_obj = page_data.get('response', {})
                 page_users = response_obj.get('users', [])
                 total_count = response_obj.get('total', 0)
-                
+
                 if not page_users:
                     break
-                
+
                 rw_users.extend(page_users)
                 logger.info(f"Fetched {len(rw_users)} / {total_count} users from Remnawave...")
-                
+
                 if len(rw_users) >= total_count or len(page_users) == 0:
                     break
-                    
+
                 current_start += len(page_users)
 
             rw_uuids = {u['uuid'] for u in rw_users}
-            
+
             # 1. Handle deletion (users that have remnawave_uuid but are no longer in Remnawave)
             to_delete_ids = []
             for u in data['users']:
                 if u.get('remnawave_uuid') and u['remnawave_uuid'] not in rw_uuids:
                     to_delete_ids.append(u['id'])
-            
+
             if to_delete_ids:
                 logger.info(f"Removing {len(to_delete_ids)} users deleted in Remnawave")
                 await perform_mass_operations(delete_uids=to_delete_ids)
 
             # 2. Sync / Create users
             synced_count = 0
-            to_toggle = [] # list of (user_id, enabled)
-            to_create_conns = [] # list of dicts
-            
+            to_toggle = []  # list of (user_id, enabled)
+            to_create_conns = []  # list of dicts
+
             for rw_u in rw_users:
                 # We reload data in each loop step to handle concurrency
                 data = load_data()
@@ -373,17 +377,17 @@ async def sync_users_with_remnawave(data: dict):
                     local_u = next((u for u in data['users'] if u['username'] == rw_u['username']), None)
 
                 is_active = (rw_u.get('status') == 'ACTIVE')
-                
+
                 if local_u:
                     local_u['username'] = rw_u['username']
                     local_u['telegramId'] = rw_u.get('telegramId')
                     local_u['email'] = rw_u.get('email')
                     local_u['description'] = rw_u.get('description')
                     local_u['remnawave_uuid'] = rw_u['uuid']
-                    
+
                     if local_u.get('enabled', True) != is_active:
                         to_toggle.append((local_u['id'], is_active))
-                    
+
                     # Save metadata immediately
                     async with DATA_LOCK:
                         current = load_data()
@@ -392,14 +396,14 @@ async def sync_users_with_remnawave(data: dict):
                         if idx != -1:
                             current['users'][idx] = local_u
                             save_data(current)
-                    
+
                     synced_count += 1
                 else:
                     new_id = str(uuid.uuid4())
                     new_user = {
                         'id': new_id,
                         'username': rw_u['username'],
-                        'password_hash': '', 
+                        'password_hash': '',
                         'role': 'user',
                         'telegramId': rw_u.get('telegramId'),
                         'email': rw_u.get('email'),
@@ -415,7 +419,7 @@ async def sync_users_with_remnawave(data: dict):
                         current = load_data()
                         current['users'].append(new_user)
                         save_data(current)
-                    
+
                     if settings.get('remnawave_create_conns'):
                         sid = settings.get('remnawave_server_id')
                         if sid is not None:
@@ -426,14 +430,15 @@ async def sync_users_with_remnawave(data: dict):
                                 'name': f"{rw_u['username']}_vpn"
                             })
                     synced_count += 1
-            
+
             # Execute all collected mass operations
             if to_toggle or to_create_conns:
-                logger.info(f"Executing mass ops for Remnawave sync: toggle={len(to_toggle)}, create={len(to_create_conns)}")
+                logger.info(
+                    f"Executing mass ops for Remnawave sync: toggle={len(to_toggle)}, create={len(to_create_conns)}")
                 await perform_mass_operations(toggle_uids=to_toggle, create_conns=to_create_conns)
-            
+
             return synced_count, "Successfully synchronized with Remnawave"
-            
+
     except Exception as e:
         logger.exception("Synchronization error")
         return 0, f"Error: {str(e)}"
@@ -492,6 +497,7 @@ class InstallProtocolRequest(BaseModel):
     tls_emulation: Optional[bool] = None
     tls_domain: Optional[str] = None
     max_connections: Optional[int] = None
+    host_network: Optional[bool] = False
 
 
 class ProtocolRequest(BaseModel):
@@ -553,7 +559,6 @@ class AddUserRequest(BaseModel):
     telemt_max_conns: Optional[int] = None
 
 
-
 class ServerConfigSaveRequest(BaseModel):
     protocol: str
     config: str
@@ -571,8 +576,9 @@ class SyncSettings(BaseModel):
     remnawave_sync: bool = False
     remnawave_sync_users: bool = False
     remnawave_create_conns: bool = False
-    remnawave_server_id: int = 0
+    remnawave_server_id: Optional[int] = 0
     remnawave_protocol: str = 'awg'
+
 
 class CaptchaSettings(BaseModel):
     enabled: bool = False
@@ -587,11 +593,10 @@ class SSLSettings(BaseModel):
     key_text: str = ''
     panel_port: int = 5000
 
+
 class TelegramSettings(BaseModel):
     token: str = ''
     enabled: bool = False
-
-
 
 
 class UpdateUserRequest(BaseModel):
@@ -602,7 +607,6 @@ class UpdateUserRequest(BaseModel):
     traffic_reset_strategy: Optional[str] = None
     expiration_date: Optional[str] = None
     password: Optional[str] = None
-
 
 
 class SaveSettingsRequest(BaseModel):
@@ -656,7 +660,7 @@ async def startup():
         }]
         changed = True
         logger.info("Default admin created (admin / admin)")
-    
+
     # Migration for sharing fields and traffic reset strategy
     for u in data['users']:
         migrated = False
@@ -669,7 +673,7 @@ async def startup():
         if 'share_password_hash' not in u:
             u['share_password_hash'] = None
             migrated = True
-        
+
         # Traffic reset strategy and total traffic
         if 'traffic_reset_strategy' not in u:
             u['traffic_reset_strategy'] = 'never'
@@ -683,11 +687,11 @@ async def startup():
         if 'expiration_date' not in u:
             u['expiration_date'] = None
             migrated = True
-            
+
         if migrated:
             changed = True
             logger.info(f"Migrated user {u['username']} to new traffic/sharing fields")
-    
+
     # SSL settings migration
     if 'ssl' not in data.get('settings', {}):
         if 'settings' not in data: data['settings'] = {}
@@ -730,7 +734,7 @@ def _scrape_server_traffic(server, sid, my_conns):
                     rx = c.get('userData', {}).get('dataReceivedBytes', 0)
                     tx = c.get('userData', {}).get('dataSentBytes', 0)
                     client_bytes[c.get('clientId')] = rx + tx
-                    
+
                 for uc in my_conns:
                     if uc['protocol'] == proto and uc['client_id'] in client_bytes:
                         curr_bytes = client_bytes[uc['client_id']]
@@ -748,22 +752,22 @@ async def periodic_background_tasks():
     while True:
         try:
             # We wait before the first sync to let the app settle
-            await asyncio.sleep(60) 
-            
+            await asyncio.sleep(60)
+
             # --- 1. TRAFFIC SYNC & LIMITS ---
             logger.info("Starting background traffic sync...")
             data = load_data()
-            
+
             conns_by_server = {}
             for uc in data.get('user_connections', []):
                 sid = uc['server_id']
                 conns_by_server.setdefault(sid, []).append(uc)
-                
+
             updates = []
-            
+
             for sid, server in enumerate(data.get('servers', [])):
                 if sid not in conns_by_server: continue
-                
+
                 # Run the blocking SSH traffic scraping in a background thread!
                 server_updates = await asyncio.to_thread(_scrape_server_traffic, server, sid, conns_by_server[sid])
                 if server_updates:
@@ -776,10 +780,10 @@ async def periodic_background_tasks():
                     users_map = {u['id']: u for u in curr_data.get('users', [])}
                     uc_list = curr_data.get('user_connections', [])
                     uc_map = {uc['id']: uc for uc in uc_list}
-                    
+
                     # Current date/time for reset checking
                     now = datetime.now()
-                    
+
                     for uc_id, delta, curr_bytes in updates:
                         if uc_id in uc_map:
                             uc_map[uc_id]['last_bytes'] = curr_bytes
@@ -789,7 +793,7 @@ async def periodic_background_tasks():
                                 # Check if reset is needed BEFORE adding new consumption
                                 strategy = u.get('traffic_reset_strategy', 'never')
                                 last_reset_iso = u.get('last_reset_at')
-                                
+
                                 reset_needed = False
                                 if strategy != 'never' and last_reset_iso:
                                     try:
@@ -797,39 +801,41 @@ async def periodic_background_tasks():
                                         if strategy == 'daily':
                                             reset_needed = now.date() > last.date()
                                         elif strategy == 'weekly':
-                                            reset_needed = now.isocalendar()[1] != last.isocalendar()[1] or now.year != last.year
+                                            reset_needed = now.isocalendar()[1] != last.isocalendar()[
+                                                1] or now.year != last.year
                                         elif strategy == 'monthly':
                                             reset_needed = now.month != last.month or now.year != last.year
                                     except:
                                         pass
-                                
+
                                 if reset_needed:
                                     logger.info(f"Resetting traffic for user {u['username']} (strategy: {strategy})")
                                     u['traffic_used'] = 0
                                     u['last_reset_at'] = now.isoformat()
-                                
+
                                 # Update both resettable and total traffic
                                 u['traffic_used'] = u.get('traffic_used', 0) + delta
                                 u['traffic_total'] = u.get('traffic_total', 0) + delta
-                                
+
                                 limit = u.get('traffic_limit', 0)
                                 if limit > 0 and u['traffic_used'] >= limit and u.get('enabled', True):
                                     if uid not in to_disable_uids:
                                         to_disable_uids.append(uid)
-                                
+
                                 # Check expiration date
                                 exp_str = u.get('expiration_date')
                                 if exp_str and u.get('enabled', True):
                                     try:
                                         exp_date = datetime.fromisoformat(exp_str)
                                         if now > exp_date:
-                                            logger.info(f"Subscription expired for user {u['username']} (expired at {exp_str})")
+                                            logger.info(
+                                                f"Subscription expired for user {u['username']} (expired at {exp_str})")
                                             if uid not in to_disable_uids:
                                                 to_disable_uids.append(uid)
                                     except:
                                         pass
                     save_data(curr_data)
-                    
+
             if to_disable_uids:
                 logger.info(f"Traffic limit reached, disabling users: {to_disable_uids}")
                 await perform_mass_operations(toggle_uids=[(uid, False) for uid in to_disable_uids])
@@ -842,10 +848,10 @@ async def periodic_background_tasks():
                 logger.info(f"Background Remnawave sync finished: {count} users updated. {msg}")
             else:
                 logger.info("Background Remnawave sync skipped (disabled in settings)")
-                
+
         except Exception as e:
             logger.error(f"Error in periodic_background_tasks: {e}")
-            
+
         # Wait 10 minutes before next sync
         await asyncio.sleep(600)
 
@@ -939,16 +945,16 @@ async def my_connections_page(request: Request):
 async def api_captcha(request: Request):
     if not CaptchaGenerator:
         return JSONResponse({"error": "multicolorcaptcha is not installed"}, status_code=500)
-    
+
     # 2 is a multiplier for the image resolution size
     generator = CaptchaGenerator(2)
     captcha = generator.gen_captcha_image(difficult_level=2)
     request.session['captcha_answer'] = captcha.characters
-    
+
     img_bytes = io.BytesIO()
     captcha.image.save(img_bytes, format='PNG')
     img_bytes.seek(0)
-    
+
     return StreamingResponse(img_bytes, media_type="image/png")
 
 
@@ -1055,7 +1061,7 @@ async def api_reboot_server(request: Request, server_id: int):
         try:
             ssh.run_sudo_command("nohup reboot > /dev/null 2>&1 &")
         except Exception:
-            pass            
+            pass
         try:
             ssh.disconnect()
         except:
@@ -1083,7 +1089,7 @@ async def api_clear_server(request: Request, server_id: int):
             ssh.run_sudo_command(f"docker rm {c} || true")
         ssh.run_sudo_command("docker network rm amnezia-dns-net || true")
         ssh.run_sudo_command("rm -rf /opt/amnezia")
-        
+
         server['protocols'] = {}
         save_data(data)
         ssh.disconnect()
@@ -1125,7 +1131,8 @@ async def api_server_stats(request: Request, server_id: int):
         try:
             parts = out.strip().split()
             used, total = int(parts[0]), int(parts[1])
-            stats.update(disk_used=used, disk_total=total, disk_percent=round(used / total * 100, 1) if total > 0 else 0)
+            stats.update(disk_used=used, disk_total=total,
+                         disk_percent=round(used / total * 100, 1) if total > 0 else 0)
         except (ValueError, IndexError):
             stats.update(disk_used=0, disk_total=0, disk_percent=0)
         out, _, _ = ssh.run_command(
@@ -1160,7 +1167,7 @@ async def api_check_server(request: Request, server_id: int):
         # Just use awg's docker checker since it uses the same command
         manager = get_protocol_manager(ssh, 'awg')
         status = {'connection': 'ok', 'docker_installed': manager.check_docker_installed(), 'protocols': {}}
-        
+
         changed = False
         if 'protocols' not in server:
             server['protocols'] = {}
@@ -1179,7 +1186,8 @@ async def api_check_server(request: Request, server_id: int):
                 return proto, None, str(e)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
-            futures = [executor.submit(check_proto, p) for p in ['awg', 'awg2', 'awg_legacy', 'xray', 'telemt', 'dns', 'wireguard']]
+            futures = [executor.submit(check_proto, p) for p in
+                       ['awg', 'awg2', 'awg_legacy', 'xray', 'telemt', 'dns', 'wireguard']]
             for future in concurrent.futures.as_completed(futures):
                 proto, result, err = future.result()
                 if err:
@@ -1198,10 +1206,10 @@ async def api_check_server(request: Request, server_id: int):
                         if proto in server['protocols']:
                             del server['protocols'][proto]
                             changed = True
-                
+
         if changed:
             save_data(data)
-            
+
         ssh.disconnect()
         return status
     except Exception as e:
@@ -1219,16 +1227,18 @@ async def api_install_protocol(request: Request, server_id: int, req: InstallPro
             return JSONResponse({'error': 'Server not found'}, status_code=404)
         if req.protocol not in ['awg', 'awg2', 'awg_legacy', 'xray', 'telemt', 'dns', 'wireguard']:
             return JSONResponse({'error': 'Invalid protocol type'}, status_code=400)
-        
+
         server = data['servers'][server_id]
         ssh = get_ssh(server)
         ssh.connect()
         manager = get_protocol_manager(ssh, req.protocol)
-        
+
+        host_network = bool(req.host_network)
+
         # Pass parameters to installer
         if req.protocol == 'telemt':
             result = manager.install_protocol(
-                protocol_type=req.protocol, 
+                protocol_type=req.protocol,
                 port=req.port,
                 tls_emulation=req.tls_emulation if req.tls_emulation is not None else True,
                 tls_domain=req.tls_domain,
@@ -1237,10 +1247,12 @@ async def api_install_protocol(request: Request, server_id: int, req: InstallPro
         elif req.protocol == 'xray':
             result = manager.install_protocol(port=req.port)
         elif req.protocol == 'wireguard':
-            result = manager.install_protocol(port=req.port)
+            result = manager.install_protocol(port=req.port, host_network=host_network)
+        elif req.protocol == 'dns':
+            result = manager.install_protocol(req.protocol, port=req.port, host_network=host_network)
         else:
-            result = manager.install_protocol(req.protocol, port=req.port)
-        
+            result = manager.install_protocol(req.protocol, port=req.port, host_network=host_network)
+
         server['protocols'][req.protocol] = {
             'installed': True, 'port': req.port,
             'awg_params': result.get('awg_params', {}),
@@ -1399,8 +1411,6 @@ async def api_server_config_save(request: Request, server_id: int, req: ServerCo
         return JSONResponse({'error': str(e)}, status_code=500)
 
 
-
-
 @app.get('/api/servers/{server_id}/connections')
 async def api_get_connections(request: Request, server_id: int, protocol: str = Query(default='awg')):
     if not protocol:
@@ -1452,7 +1462,7 @@ async def api_add_connection(request: Request, server_id: int, req: AddConnectio
         ssh = get_ssh(server)
         ssh.connect()
         manager = get_protocol_manager(ssh, req.protocol)
-        
+
         if req.protocol == 'telemt':
             result = manager.add_client(
                 req.protocol, req.name, server['host'], port,
@@ -1529,11 +1539,11 @@ async def api_edit_connection(request: Request, server_id: int, req: EditConnect
         if server_id >= len(data['servers']):
             return JSONResponse({'error': 'Server not found'}, status_code=404)
         server = data['servers'][server_id]
-        
+
         ssh = get_ssh(server)
         ssh.connect()
         manager = get_protocol_manager(ssh, req.protocol)
-        
+
         edit_params = {}
         if req.protocol == 'telemt':
             edit_params['telemt_quota'] = req.telemt_quota
@@ -1542,7 +1552,7 @@ async def api_edit_connection(request: Request, server_id: int, req: EditConnect
             edit_params['secret'] = req.telemt_secret
             edit_params['user_ad_tag'] = req.telemt_ad_tag
             edit_params['max_tcp_conns'] = req.telemt_max_conns
-            
+
         result = manager.edit_client(req.protocol, req.client_id, edit_params)
         ssh.disconnect()
         return result
@@ -1564,7 +1574,8 @@ async def api_get_connection_config(request: Request, server_id: int, req: Conne
         if user['role'] == 'user':
             owned = any(
                 c for c in data.get('user_connections', [])
-                if c.get('client_id') == req.client_id and c.get('server_id') == server_id and c.get('user_id') == user['id']
+                if c.get('client_id') == req.client_id and c.get('server_id') == server_id and c.get('user_id') == user[
+                    'id']
             )
             if not owned:
                 return JSONResponse({'error': 'Forbidden'}, status_code=403)
@@ -1620,24 +1631,24 @@ async def api_list_users(request: Request, search: str = '', page: int = 1, size
     data = load_data()
     all_users = data.get('users', [])
     conns = data.get('user_connections', [])
-    
+
     # Filter
     filtered = []
     search = search.lower()
     for u in all_users:
         if search:
-            match = (search in u['username'].lower() or 
-                     (u.get('email') and search in u['email'].lower()) or 
+            match = (search in u['username'].lower() or
+                     (u.get('email') and search in u['email'].lower()) or
                      (u.get('telegramId') and search in str(u['telegramId']).lower()))
             if not match:
                 continue
         filtered.append(u)
-        
+
     total = len(filtered)
     start = (page - 1) * size
     end = start + size
     page_items = filtered[start:end]
-    
+
     users = []
     for u in page_items:
         users.append({
@@ -1688,7 +1699,7 @@ async def api_add_user(request: Request, req: AddUserRequest):
             'telegramId': req.telegramId,
             'email': req.email,
             'description': req.description,
-            'traffic_limit': int(req.traffic_limit * 1024**3) if req.traffic_limit else 0,
+            'traffic_limit': int(req.traffic_limit * 1024 ** 3) if req.traffic_limit else 0,
             'traffic_reset_strategy': req.traffic_reset_strategy or 'never',
             'traffic_used': 0,
             'traffic_total': 0,
@@ -1762,26 +1773,26 @@ async def api_update_user(request: Request, user_id: str, req: UpdateUserRequest
         user = next((u for u in data['users'] if u['id'] == user_id), None)
         if not user:
             return JSONResponse({'error': 'User not found'}, status_code=404)
-            
+
         if req.telegramId is not None: user['telegramId'] = req.telegramId
         if req.email is not None: user['email'] = req.email
         if req.description is not None: user['description'] = req.description
-        if req.traffic_limit is not None: 
-            new_limit = int(req.traffic_limit * 1024**3)
+        if req.traffic_limit is not None:
+            new_limit = int(req.traffic_limit * 1024 ** 3)
             user['traffic_limit'] = new_limit
-        
+
         if req.traffic_reset_strategy is not None:
             user['traffic_reset_strategy'] = req.traffic_reset_strategy
             user['last_reset_at'] = datetime.now().isoformat()
-            
+
         if req.expiration_date is not None:
             user['expiration_date'] = req.expiration_date or None
 
         if req.password:
             user['password_hash'] = hash_password(req.password)
-            
+
         save_data(data)
-        
+
         # Auto re-enable if traffic limit increased beyond usage
         if req.traffic_limit is not None:
             if new_limit > 0 and user.get('traffic_used', 0) < new_limit and not user.get('enabled', True):
@@ -1848,12 +1859,13 @@ async def api_add_user_connection(request: Request, user_id: str, req: AddUserCo
         ssh = get_ssh(server)
         await asyncio.to_thread(ssh.connect)
         manager = get_protocol_manager(ssh, req.protocol)
-        
+
         if req.client_id:
             # Use existing client
             target_client_id = req.client_id
             # Retrieve config for existing client
-            config = await asyncio.to_thread(manager.get_client_config, req.protocol, req.client_id, server['host'], port)
+            config = await asyncio.to_thread(manager.get_client_config, req.protocol, req.client_id, server['host'],
+                                             port)
             result = {'client_id': target_client_id, 'config': config}
         else:
             # Create new client
@@ -1869,7 +1881,7 @@ async def api_add_user_connection(request: Request, user_id: str, req: AddUserCo
                 )
             else:
                 result = await asyncio.to_thread(manager.add_client, req.protocol, req.name, server['host'], port)
-        
+
         await asyncio.to_thread(ssh.disconnect)
 
         if result.get('client_id'):
@@ -1939,15 +1951,15 @@ async def api_user_share_setup(user_id: str, req: ShareSetupRequest, request: Re
     user = next((u for u in data['users'] if u['id'] == user_id), None)
     if not user:
         return JSONResponse({'error': 'User not found'}, status_code=404)
-    
+
     user['share_enabled'] = req.enabled
     if not user.get('share_token'):
         user['share_token'] = secrets.token_urlsafe(16)
     if req.password:
         user['share_password_hash'] = hash_password(req.password)
-    elif req.password == "": # Clear
+    elif req.password == "":  # Clear
         user['share_password_hash'] = None
-        
+
     save_data(data)
     return {'status': 'success', 'share_token': user.get('share_token')}
 
@@ -1958,14 +1970,15 @@ async def share_page(token: str, request: Request):
     user = next((u for u in data['users'] if u.get('share_token') == token), None)
     if not user or not user.get('share_enabled'):
         lang = request.cookies.get('lang', 'ru')
-        return HTMLResponse(f"<h1>{_t('share_not_found', lang)}</h1><p>{_t('share_not_found_desc', lang)}</p>", status_code=404)
-    
+        return HTMLResponse(f"<h1>{_t('share_not_found', lang)}</h1><p>{_t('share_not_found_desc', lang)}</p>",
+                            status_code=404)
+
     auth_session_key = f'share_auth_{token}'
     need_password = bool(user.get('share_password_hash')) and not request.session.get(auth_session_key)
-    
-    return tpl(request, 'user_share.html', 
-               share_user=user, 
-               need_password=need_password, 
+
+    return tpl(request, 'user_share.html',
+               share_user=user,
+               need_password=need_password,
                token=token)
 
 
@@ -1975,7 +1988,7 @@ async def api_share_auth(token: str, req: ShareAuthRequest, request: Request):
     user = next((u for u in data['users'] if u.get('share_token') == token), None)
     if not user or not user.get('share_enabled'):
         return JSONResponse({'error': 'Link expired or disabled'}, status_code=404)
-    
+
     if verify_password(req.password, user.get('share_password_hash', '')):
         request.session[f'share_auth_{token}'] = True
         return {'status': 'success'}
@@ -1990,11 +2003,11 @@ async def api_share_connections(token: str, request: Request):
     user = next((u for u in data['users'] if u.get('share_token') == token), None)
     if not user or not user.get('share_enabled'):
         return JSONResponse({'error': 'Forbidden'}, status_code=403)
-    
+
     if user.get('share_password_hash'):
         if not request.session.get(f'share_auth_{token}'):
             return JSONResponse({'error': 'Unauthorized'}, status_code=401)
-            
+
     conns = [dict(c) for c in data.get('user_connections', []) if c['user_id'] == user['id']]
     for c in conns:
         sid = c['server_id']
@@ -2002,7 +2015,7 @@ async def api_share_connections(token: str, request: Request):
             c['server_name'] = data['servers'][sid].get('name') or data['servers'][sid]['host']
         else:
             c['server_name'] = 'Unknown'
-            
+
     return {'connections': conns, 'username': user['username']}
 
 
@@ -2012,15 +2025,16 @@ async def api_share_config(token: str, connection_id: str, request: Request):
     user = next((u for u in data['users'] if u.get('share_token') == token), None)
     if not user or not user.get('share_enabled'):
         return JSONResponse({'error': 'Forbidden'}, status_code=403)
-    
+
     if user.get('share_password_hash'):
         if not request.session.get(f'share_auth_{token}'):
             return JSONResponse({'error': 'Unauthorized'}, status_code=401)
-            
-    conn = next((c for c in data.get('user_connections', []) if c['id'] == connection_id and c['user_id'] == user['id']), None)
+
+    conn = next(
+        (c for c in data.get('user_connections', []) if c['id'] == connection_id and c['user_id'] == user['id']), None)
     if not conn:
         return JSONResponse({'error': 'Not found'}, status_code=404)
-        
+
     try:
         sid = conn['server_id']
         server = data['servers'][sid]
@@ -2077,7 +2091,8 @@ async def settings_page(request: Request):
     if not user:
         return RedirectResponse('/login')
     data = load_data()
-    return tpl(request, 'settings.html', settings=data.get('settings', {}), servers=data.get('servers', []), current_version=CURRENT_VERSION)
+    return tpl(request, 'settings.html', settings=data.get('settings', {}), servers=data.get('servers', []),
+               current_version=CURRENT_VERSION)
 
 
 @app.get('/api/settings')
@@ -2094,12 +2109,12 @@ async def api_get_settings(request: Request):
 #     data = load_data()
 #     data['settings'] = body.dict()
 #     save_data(data)
-    
+
 #     # Trigger sync if enabled
 #     if body.sync.remnawave_sync_users:
 #         await sync_users_with_remnawave(data)
 #         save_data(data)
-        
+
 #     return {'status': 'success'}
 
 @app.post('/api/settings/save')
@@ -2153,6 +2168,7 @@ async def api_telegram_toggle(request: Request):
         save_data(data)
         return {'status': 'started', 'bot_running': True}
 
+
 @app.post('/api/settings/sync_now')
 async def api_sync_now(request: Request):
     if not _check_admin(request):
@@ -2187,10 +2203,11 @@ async def api_get_server_clients(request: Request, server_id: int, protocol: str
         manager = get_protocol_manager(ssh, protocol)
         clients = manager.get_clients(protocol)
         ssh.disconnect()
-        
+
         # Filter: only show clients that are not assigned to anyone in the panel
-        assigned_ids = {c['client_id'] for c in data.get('user_connections', []) if c['server_id'] == server_id and c['protocol'] == protocol}
-        
+        assigned_ids = {c['client_id'] for c in data.get('user_connections', []) if
+                        c['server_id'] == server_id and c['protocol'] == protocol}
+
         filtered = []
         for c in clients:
             if c['clientId'] not in assigned_ids:
@@ -2198,7 +2215,7 @@ async def api_get_server_clients(request: Request, server_id: int, protocol: str
                     'id': c['clientId'],
                     'name': c.get('userData', {}).get('clientName', 'Unnamed')
                 })
-        
+
         return {'clients': filtered}
     except Exception as e:
         logger.exception("Error getting server clients")
@@ -2222,7 +2239,7 @@ async def api_backup_restore(request: Request, file: UploadFile = File(...)):
         content = await file.read()
         if not content:
             return JSONResponse({'error': 'Empty file'}, status_code=400)
-        
+
         try:
             backup_data = json.loads(content)
         except json.JSONDecodeError:
@@ -2241,7 +2258,7 @@ async def api_backup_restore(request: Request, file: UploadFile = File(...)):
         # Save the new data
         async with DATA_LOCK:
             save_data(backup_data)
-        
+
         # In a real app we might want to restart or re-init background tasks
         return {'status': 'success'}
     except Exception as e:
@@ -2252,22 +2269,22 @@ async def api_backup_restore(request: Request, file: UploadFile = File(...)):
 if __name__ == '__main__':
     data = load_data()
     ssl_conf = data.get('settings', {}).get('ssl', {})
-    
+
     cert_file = ssl_conf.get('cert_path')
     key_file = ssl_conf.get('key_path')
-    
+
     # If text is provided, create temporary files
     temp_dir = os.path.join(os.getcwd(), 'ssl_temp')
     if ssl_conf.get('enabled'):
         if ssl_conf.get('cert_text') or ssl_conf.get('key_text'):
             if not os.path.exists(temp_dir):
                 os.makedirs(temp_dir)
-            
+
             if ssl_conf.get('cert_text'):
                 cert_file = os.path.join(temp_dir, 'cert.pem')
                 with open(cert_file, 'w') as f:
                     f.write(ssl_conf['cert_text'].strip() + '\n')
-            
+
             if ssl_conf.get('key_text'):
                 key_file = os.path.join(temp_dir, 'key.pem')
                 with open(key_file, 'w') as f:
@@ -2278,10 +2295,11 @@ if __name__ == '__main__':
         "host": "0.0.0.0",
         "port": ssl_conf.get('panel_port', 5000)
     }
-    
+
     if ssl_conf.get('enabled') and cert_file and key_file:
         if os.path.exists(cert_file) and os.path.exists(key_file):
-            logger.info(f"Starting panel with HTTPS enabled on domain: {ssl_conf.get('domain')} at port {uvicorn_kwargs['port']}")
+            logger.info(
+                f"Starting panel with HTTPS enabled on domain: {ssl_conf.get('domain')} at port {uvicorn_kwargs['port']}")
             uvicorn_kwargs["ssl_certfile"] = cert_file
             uvicorn_kwargs["ssl_keyfile"] = key_file
         else:

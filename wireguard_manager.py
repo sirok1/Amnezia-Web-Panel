@@ -137,7 +137,7 @@ iptables -C FORWARD -j DOCKER-USER 2>/dev/null || iptables -A FORWARD -j DOCKER-
         self.ssh.run_sudo_script(script)
         return True
 
-    def install_protocol(self, port=None):
+    def install_protocol(self, port=None, host_network=False):
         """
         Full installation of WireGuard protocol.
         Steps: install docker -> prepare host -> build container ->
@@ -199,7 +199,25 @@ iptables -C FORWARD -j DOCKER-USER 2>/dev/null || iptables -A FORWARD -j DOCKER-
 
         # Step 5: Run container
         results.append("Starting container...")
-        run_cmd = f"""docker run -d \
+        if host_network:
+            # src_valid_mark sysctl is disallowed inside a host-net container → set it on the host,
+            # and persist via a sysctl.d drop-in so it survives reboot.
+            self.ssh.run_sudo_command(
+                "sh -c \"echo 'net.ipv4.conf.all.src_valid_mark=1' "
+                "> /etc/sysctl.d/99-amnezia-src-valid-mark.conf && "
+                "sysctl -p /etc/sysctl.d/99-amnezia-src-valid-mark.conf\""
+            )
+            run_cmd = f"""docker run -d \
+--restart always \
+--privileged \
+--network host \
+--cap-add=NET_ADMIN \
+--cap-add=SYS_MODULE \
+-v /lib/modules:/lib/modules \
+--name {self.CONTAINER_NAME} \
+{self.CONTAINER_NAME}"""
+        else:
+            run_cmd = f"""docker run -d \
 --restart always \
 --privileged \
 --cap-add=NET_ADMIN \
@@ -214,8 +232,9 @@ iptables -C FORWARD -j DOCKER-USER 2>/dev/null || iptables -A FORWARD -j DOCKER-
         if code != 0:
             raise RuntimeError(f"Failed to run container: {err}")
 
-        # Connect to DNS network
-        self.ssh.run_sudo_command(f"docker network connect amnezia-dns-net {self.CONTAINER_NAME}")
+        # Connect to DNS network (skip in host mode — a host-net container can't also join a bridge)
+        if not host_network:
+            self.ssh.run_sudo_command(f"docker network connect amnezia-dns-net {self.CONTAINER_NAME}")
 
         # Wait for container
         results.append("Waiting for container to start...")
